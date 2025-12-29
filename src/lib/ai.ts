@@ -28,7 +28,7 @@ async function getPromptContent(): Promise<string> {
 /**
  * 获取AI设置
  */
-async function getAISettings(modelType?: string): Promise<AiConfig | undefined> {
+export async function getAISettings(modelType?: string): Promise<AiConfig | undefined> {
   const store = await Store.load('store.json')
   const aiConfigs = await store.get<AiConfig[]>('aiModelList')
   const modelId = await store.get(modelType || 'primaryModel')

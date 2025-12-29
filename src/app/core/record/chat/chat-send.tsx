@@ -24,7 +24,7 @@ interface ChatSendProps {
 
 export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ inputValue, onSent, linkedFile }, ref) => {
   const { primaryModel } = useSettingStore()
-  const { insert, loading, setLoading, saveChat, chats, chatMode, setAgentState } = useChatStore()
+  const { insert, loading, setLoading, saveChat, chats, chatMode, requestAgentConfirmation } = useChatStore()
   const { isRagEnabled } = useVectorStore()
   const { selectedServerIds } = useMcpStore()
   const abortControllerRef = useRef<AbortController | null>(null)
@@ -34,28 +34,6 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
   useImperativeHandle(ref, () => ({
     sendChat: handleSubmit
   }))
-
-  // Agent 确认回调 - 使用内联确认而不是弹窗
-  const requestConfirmation = (toolName: string, params: Record<string, any>): Promise<boolean> => {
-    return new Promise((resolve) => {
-      // 将确认请求保存到 store，在对话中显示
-      setAgentState({ 
-        pendingConfirmation: { toolName, params }
-      })
-      
-      // 轮询检查用户是否已确认或取消
-      const checkInterval = setInterval(() => {
-        const currentState = useChatStore.getState()
-        
-        // 如果 pendingConfirmation 被清除，说明用户已操作
-        if (!currentState.agentState.pendingConfirmation) {
-          clearInterval(checkInterval)
-          // 如果 Agent 仍在运行，说明用户确认了
-          resolve(currentState.agentState.isRunning)
-        }
-      }, 100)
-    })
-  }
 
   // Agent 模式处理
   async function handleAgentMode() {
@@ -71,7 +49,7 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
 
     // 每次都创建新的 AgentHandler，使用当前的 placeholderMessage
     const agentHandler = new AgentHandler({
-      requestConfirmation,
+      requestConfirmation: requestAgentConfirmation,
       onComplete: async (result) => {
         // 获取 Agent 执行历史
         const { agentState } = useChatStore.getState()

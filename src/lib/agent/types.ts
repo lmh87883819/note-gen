@@ -44,6 +44,9 @@ export interface ConfirmationRecord {
 
 export interface AgentState {
   isRunning: boolean
+  phase: 'idle' | 'planning' | 'executing' | 'awaiting_confirmation' | 'completed' | 'stopped' | 'error'
+  runId: string
+  plan: string[]
   currentThought: string
   thoughtHistory: string[] // 累积的思考历史
   currentAction?: string
@@ -52,10 +55,12 @@ export interface AgentState {
   maxIterations: number
   currentIteration: number
   pendingConfirmation?: {
+    id: string
     toolName: string
     params: Record<string, any>
   }
   confirmationHistory: ConfirmationRecord[] // 确认操作的历史记录
+  lastError?: string
 }
 
 export interface ReActStep {

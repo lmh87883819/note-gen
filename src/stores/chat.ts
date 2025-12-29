@@ -2,7 +2,9 @@ import { create } from 'zustand'
 import { Chat, DEFAULT_CHAT_TAG_ID, clearChatsByTagId, deleteChat, getChats, initChatsDb, insertChat, updateChat, updateChatsInsertedById } from '@/db/chats'
 import { Store } from '@tauri-apps/plugin-store';
 import { locales } from '@/lib/locales';
-import { ChatMode, AgentState, ToolCall } from '@/lib/agent/types';
+import { ChatMode, AgentState, ConfirmationRecord, ToolCall } from '@/lib/agent/types';
+
+const confirmationResolvers = new Map<string, (value: boolean) => void>()
 
 // MCP 工具调用记录（临时，不保存到数据库）
 export interface McpToolCall {
@@ -54,6 +56,8 @@ interface ChatState {
   resetAgentState: () => void
   addAgentToolCall: (toolCall: ToolCall) => void
   updateAgentToolCall: (id: string, updates: Partial<ToolCall>) => void
+  requestAgentConfirmation: (toolName: string, params: Record<string, any>) => Promise<boolean>
+  resolveAgentConfirmation: (confirmed: boolean) => void
 }
 
 const useChatStore = create<ChatState>((set, get) => ({
@@ -78,6 +82,9 @@ const useChatStore = create<ChatState>((set, get) => ({
 
   agentState: {
     isRunning: false,
+    phase: 'idle',
+    runId: '',
+    plan: [],
     currentThought: '',
     thoughtHistory: [],
     currentAction: undefined,
@@ -87,6 +94,7 @@ const useChatStore = create<ChatState>((set, get) => ({
     currentIteration: 0,
     pendingConfirmation: undefined,
     confirmationHistory: [],
+    lastError: undefined,
   },
 
   setAgentState: (state: Partial<AgentState>) => {
@@ -97,6 +105,9 @@ const useChatStore = create<ChatState>((set, get) => ({
     set({
       agentState: {
         isRunning: false,
+        phase: 'idle',
+        runId: '',
+        plan: [],
         currentThought: '',
         thoughtHistory: [],
         currentAction: '',
@@ -106,6 +117,7 @@ const useChatStore = create<ChatState>((set, get) => ({
         currentIteration: 0,
         pendingConfirmation: undefined,
         confirmationHistory: [],
+        lastError: undefined,
       }
     })
   },
@@ -130,6 +142,50 @@ const useChatStore = create<ChatState>((set, get) => ({
         )
       }
     })
+  },
+
+  requestAgentConfirmation: async (toolName: string, params: Record<string, any>) => {
+    const { agentState } = get()
+    const confirmationId = `${agentState.runId || 'run'}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+
+    set({
+      agentState: {
+        ...agentState,
+        phase: 'awaiting_confirmation',
+        pendingConfirmation: { id: confirmationId, toolName, params }
+      }
+    })
+
+    return await new Promise<boolean>((resolve) => {
+      confirmationResolvers.set(confirmationId, resolve)
+    })
+  },
+
+  resolveAgentConfirmation: (confirmed: boolean) => {
+    const { agentState } = get()
+    const pending = agentState.pendingConfirmation
+    if (!pending) return
+
+    const resolve = confirmationResolvers.get(pending.id)
+    confirmationResolvers.delete(pending.id)
+
+    const confirmationRecord: ConfirmationRecord = {
+      toolName: pending.toolName,
+      params: pending.params,
+      status: confirmed ? 'confirmed' : 'cancelled',
+      timestamp: Date.now(),
+    }
+
+    set({
+      agentState: {
+        ...agentState,
+        phase: 'executing',
+        pendingConfirmation: undefined,
+        confirmationHistory: [...agentState.confirmationHistory, confirmationRecord],
+      }
+    })
+
+    resolve?.(confirmed)
   },
 
   chats: [],

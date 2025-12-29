@@ -4,6 +4,7 @@ import useChatStore from '@/stores/chat'
 
 export interface AgentHandlerConfig {
   onThought?: (thought: string) => void
+  onPlan?: (plan: string[]) => void
   onAction?: (action: string, params: Record<string, any>) => void
   onObservation?: (observation: string) => void
   onComplete?: (result: string) => void
@@ -21,13 +22,20 @@ export class AgentHandler {
 
   async execute(userInput: string, context?: string): Promise<string> {
     const store = useChatStore.getState()
+    const runId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
     
     store.resetAgentState()
-    store.setAgentState({ isRunning: true })
+    store.setAgentState({ isRunning: true, phase: 'planning', runId, currentIteration: 0, plan: [], lastError: undefined })
 
     const reactConfig: ReActConfig = {
       maxIterations: 15,
-      onIterationStart: () => {
+      onIterationStart: (iteration) => {
+        const { agentState } = useChatStore.getState()
+        store.setAgentState({
+          currentIteration: iteration,
+          maxIterations: 15,
+          ...(agentState.phase === 'planning' ? { phase: 'executing' } : {}),
+        })
         // 在新迭代开始时，将当前思考保存到历史
         const currentState = useChatStore.getState()
         if (currentState.agentState.currentThought) {
@@ -42,6 +50,10 @@ export class AgentHandler {
         // 流式输出时只更新当前思考，不保存到历史
         store.setAgentState({ currentThought: thought })
         this.config.onThought?.(thought)
+      },
+      onPlan: (plan: string[]) => {
+        store.setAgentState({ plan, phase: 'executing' })
+        this.config.onPlan?.(plan)
       },
       onAction: (action, params) => {
         store.setAgentState({ currentAction: `${action}(${JSON.stringify(params)})` })
@@ -68,7 +80,7 @@ export class AgentHandler {
 
     try {
       const result = await this.agent.run(userInput, context)
-      store.setAgentState({ isRunning: false })
+      store.setAgentState({ isRunning: false, phase: result === '' ? 'stopped' : 'completed' })
       
       // 如果结果为空字符串，说明被用户终止
       if (result === '') {
@@ -79,8 +91,8 @@ export class AgentHandler {
       this.config.onComplete?.(result)
       return result
     } catch (error) {
-      store.setAgentState({ isRunning: false })
       const errorMessage = error instanceof Error ? error.message : String(error)
+      store.setAgentState({ isRunning: false, phase: 'error', lastError: errorMessage })
       this.config.onError?.(errorMessage)
       throw error
     }

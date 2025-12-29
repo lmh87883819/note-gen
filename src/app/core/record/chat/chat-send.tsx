@@ -19,10 +19,10 @@ import { AgentHandler } from "@/lib/agent/agent-handler"
 interface ChatSendProps {
   inputValue: string;
   onSent?: () => void;
-  linkedFile?: MarkdownFile | null;
+  linkedFiles?: MarkdownFile[];
 }
 
-export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ inputValue, onSent, linkedFile }, ref) => {
+export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ inputValue, onSent, linkedFiles }, ref) => {
   const { primaryModel } = useSettingStore()
   const { insert, loading, setLoading, saveChat, chats, chatMode, requestAgentConfirmation } = useChatStore()
   const { isRagEnabled } = useVectorStore()
@@ -46,6 +46,9 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
     })
 
     if (!placeholderMessage) return
+
+    // Agent 上下文：把 @ 引用的文件内容作为 context 传入（避免污染用户输入本身）
+    const agentContext = await buildLinkedFilesContext(linkedFiles)
 
     // 每次都创建新的 AgentHandler，使用当前的 placeholderMessage
     const agentHandler = new AgentHandler({
@@ -90,7 +93,7 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
     agentHandlerRef.current = agentHandler
 
     try {
-      await agentHandler.execute(inputValue)
+      await agentHandler.execute(inputValue, agentContext || undefined)
     } catch (error) {
       console.error('Agent execution error:', error)
     } finally {
@@ -143,29 +146,7 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
     // 准备请求内容
     let ragContext = ''
     let ragSources: string[] = []
-    let linkedFileContent = ''
-    
-    // 如果有关联文件，读取文件内容
-    if (linkedFile) {
-      try {
-        const workspace = await getWorkspacePath()
-        if (workspace.isCustom) {
-          linkedFileContent = await readTextFile(linkedFile.path)
-        } else {
-          const { path, baseDir } = await getFilePathOptions(linkedFile.path)
-          linkedFileContent = await readTextFile(path, { baseDir })
-        }
-        
-        if (linkedFileContent) {
-          linkedFileContent = `
-The following is the content of the linked file "${linkedFile.name}" (${linkedFile.relativePath}):
-${linkedFileContent}
-`
-        }
-      } catch (error) {
-        console.error('Failed to read linked file:', error)
-      }
-    }
+    const linkedFilesContent = await buildLinkedFilesContext(linkedFiles)
     
     // 如果启用RAG，获取相关上下文
     if (isRagEnabled) {
@@ -197,7 +178,7 @@ ${ragContext}
           .map((item, index) => `${index + 1}. ${item.content}`)
           .join(';\n\n')
       }
-      ${linkedFileContent.trim()}
+      ${linkedFilesContent.trim()}
       ${ragContext.trim()}
       ${inputValue.trim()}
     `.trim()
@@ -288,3 +269,38 @@ ${ragContext}
 })
 
 ChatSend.displayName = 'ChatSend';
+
+async function buildLinkedFilesContext(linkedFiles?: MarkdownFile[]): Promise<string> {
+  if (!linkedFiles || linkedFiles.length === 0) return ''
+
+  try {
+    const workspace = await getWorkspacePath()
+    const fileContents: string[] = []
+
+    for (const file of linkedFiles) {
+      try {
+        let content = ''
+        if (workspace.isCustom) {
+          content = await readTextFile(file.path)
+        } else {
+          const { path, baseDir } = await getFilePathOptions(file.path)
+          content = await readTextFile(path, { baseDir })
+        }
+
+        if (content) {
+          fileContents.push(`
+The following is the content of the linked file "${file.name}" (${file.relativePath}):
+${content}
+`.trim())
+        }
+      } catch (error) {
+        console.error('Failed to read linked file:', file, error)
+      }
+    }
+
+    return fileContents.join('\n\n')
+  } catch (error) {
+    console.error('Failed to read linked files:', error)
+    return ''
+  }
+}

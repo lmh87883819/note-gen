@@ -139,3 +139,20 @@ pre.hljs {
 .markdown-body img {
   max-width: 100%;
 }
+
+/* Chat input contentEditable */
+.chat-input-ce {
+  padding-bottom: 4px;
+}
+
+.chat-input-ce[data-empty="true"]::before {
+  content: attr(data-placeholder);
+  @apply text-muted-foreground;
+  pointer-events: none;
+}
+
+.chat-file-mention {
+  @apply inline-flex items-center rounded-md px-1.5 py-0.5 mr-1 bg-muted text-foreground border border-border;
+  font-size: 12px;
+  line-height: 16px;
+}

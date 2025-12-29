@@ -2,18 +2,15 @@
 import * as React from "react"
 import { useEffect, useRef, useState } from "react"
 import useSettingStore from "@/stores/setting"
-import { Textarea } from "@/components/ui/textarea"
 import useChatStore from "@/stores/chat"
-import useArticleStore from "@/stores/article"
 import { fetchAiPlaceholder } from "@/lib/ai"
 import { useTranslations } from 'next-intl'
 import { useLocalStorage } from 'react-use';
 import { ModelSelect } from "./model-select"
-import { getWorkspacePath } from "@/lib/workspace"
 import { PromptSelect } from "./prompt-select"
 import { ChatLanguage } from "./chat-language"
 import { ChatSend } from "./chat-send"
-import { LinkedFileDisplay, FileLink } from "./file-link"
+import { FileLink } from "./file-link"
 import { FileSelector } from "./file-selector"
 import { McpButton } from "./mcp-button"
 import { RagSwitch } from "./rag-switch"
@@ -46,15 +43,19 @@ export function ChatInput() {
   const { primaryModel, chatToolbarConfigPc, setChatToolbarConfigPc, chatToolbarConfigMobile } = useSettingStore()
   const { chats, loading, isPlaceholderEnabled } = useChatStore()
   const [showFileSelector, setShowFileSelector] = useState(false)
-  const { activeFilePath } = useArticleStore()
   const [isComposing, setIsComposing] = useState(false)
   const [placeholder, setPlaceholder] = useState('')
   const t = useTranslations()
   const [inputHistory, setInputHistory] = useLocalStorage<string[]>('chat-input-history', [])
   const [historyIndex, setHistoryIndex] = useState(-1)
-  const [linkedFile, setLinkedFile] = useState<MarkdownFile | null>(null)
+  const [linkedFiles, setLinkedFiles] = useState<MarkdownFile[]>([])
   const chatSendRef = useRef<any>(null)
   const isMobile = useIsMobile()
+  const editorRef = useRef<HTMLDivElement | null>(null)
+  const selectionRangeRef = useRef<Range | null>(null)
+  const pendingAtCleanupRef = useRef(false)
+  const atInsertRangeRef = useRef<Range | null>(null)
+  const mentionOpeningRef = useRef(false)
 
   // 拖拽传感器配置（仅桌面端）
   const sensors = useSensors(
@@ -102,21 +103,15 @@ export function ChatInput() {
     }
   }
 
-  // 移除关联文件
-  function removeLinkedFile() {
-    setLinkedFile(null)
-  }
-
   // 处理发送后的清理工作
   function handleSent() {
     // 添加到历史记录
     addToHistory(text)
     setText('')
     setHistoryIndex(-1)
-    // 重置 textarea 的高度为默认值
-    const textarea = document.querySelector('textarea')
-    if (textarea) {
-      textarea.style.height = 'auto'
+    setLinkedFiles([])
+    if (editorRef.current) {
+      editorRef.current.innerHTML = ''
     }
   }
 
@@ -148,7 +143,7 @@ export function ChatInput() {
   // 插入占位符
   function insertPlaceholder() {
     if (placeholder.includes('[Tab]')) {
-      setText(placeholder.replace('[Tab]', ''))
+      setContentText(placeholder.replace('[Tab]', ''))
       setPlaceholder('')
     }
   }
@@ -197,10 +192,10 @@ export function ChatInput() {
 
   useEffect(() => {
     emitter.on('revertChat', (event: unknown) => {
-      setText(event as string)
+      setContentText(event as string)
     })
     emitter.on('fileSelected', (event: unknown) => {
-      setLinkedFile(event as MarkdownFile)
+      addLinkedFileAndInsert(event as MarkdownFile)
     })
     return () => {
       emitter.off('revertChat')
@@ -208,84 +203,298 @@ export function ChatInput() {
     }
   }, [])
 
-  // 自动关联当前打开的 markdown 文件
-  useEffect(() => {
-    async function linkCurrentFile() {
-      if (activeFilePath && activeFilePath.endsWith('.md')) {
-        const workspace = await getWorkspacePath()
-        const fileName = activeFilePath.split('/').pop() || activeFilePath
-        
-        // 构建完整路径
-        let fullPath: string
-        if (workspace.isCustom) {
-          const pathParts = activeFilePath.split('/')
-          fullPath = workspace.path + '/' + pathParts.join('/')
-        } else {
-          fullPath = activeFilePath
-        }
-        
-        setLinkedFile({
-          name: fileName,
-          path: fullPath,
-          relativePath: activeFilePath
-        })
-      } else {
-        // 如果没有打开的文件，清除关联
-        setLinkedFile(null)
+  function normalizeFilePathForMention(file: MarkdownFile) {
+    return file.relativePath || file.name || file.path
+  }
+
+  function addLinkedFile(file: MarkdownFile) {
+    const key = normalizeFilePathForMention(file)
+    setLinkedFiles((prev) => {
+      if (prev.some(f => normalizeFilePathForMention(f) === key)) return prev
+      return [...prev, file]
+    })
+  }
+
+  function insertFileMention(file: MarkdownFile) {
+    const el = editorRef.current
+    if (!el) return
+
+    const span = document.createElement('span')
+    span.setAttribute('data-mention', 'file')
+    span.setAttribute('data-path', file.path)
+    span.setAttribute('data-relative-path', file.relativePath || '')
+    span.setAttribute('data-name', file.name || '')
+    span.contentEditable = 'false'
+    span.className = 'chat-file-mention'
+    span.textContent = `@${file.name}`
+
+    const range = selectionRangeRef.current || window.getSelection()?.getRangeAt(0) || null
+    if (range) {
+      range.deleteContents()
+      range.insertNode(document.createTextNode(' '))
+      range.insertNode(span)
+      range.collapse(false)
+      const selection = window.getSelection()
+      if (selection) {
+        selection.removeAllRanges()
+        selection.addRange(range)
+      }
+    } else {
+      el.appendChild(span)
+      el.appendChild(document.createTextNode(' '))
+    }
+
+    updateTextFromDom()
+  }
+
+  function removeAtBeforeCaretIfAny() {
+    const el = editorRef.current
+    if (!el) return
+
+    const selection = window.getSelection()
+    if (!selection || selection.rangeCount === 0) return
+
+    const range = selection.getRangeAt(0)
+    const container = range.startContainer
+    const offset = range.startOffset
+
+    // 仅处理文本节点：删除光标前一个字符是 @ 的情况
+    if (container.nodeType === Node.TEXT_NODE) {
+      const textNode = container as Text
+      const text = textNode.data || ''
+      if (offset > 0 && text[offset - 1] === '@') {
+        textNode.deleteData(offset - 1, 1)
+        // 重置光标位置
+        const nextRange = document.createRange()
+        nextRange.setStart(textNode, offset - 1)
+        nextRange.collapse(true)
+        selection.removeAllRanges()
+        selection.addRange(nextRange)
+        selectionRangeRef.current = nextRange.cloneRange()
+        updateTextFromDom()
       }
     }
-    
-    linkCurrentFile()
-  }, [activeFilePath])
+  }
+
+  function sanitizeStrayAtCharacters() {
+    const el = editorRef.current
+    if (!el) return
+
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+    const textNodes: Text[] = []
+    let node: Node | null
+    while ((node = walker.nextNode())) {
+      textNodes.push(node as Text)
+    }
+
+    for (const textNode of textNodes) {
+      if (!textNode.data?.includes('@')) continue
+      textNode.data = textNode.data.replace(/@/g, '')
+    }
+  }
+
+  function scheduleAtCleanup() {
+    pendingAtCleanupRef.current = true
+
+    const cleanup = () => {
+      if (!pendingAtCleanupRef.current) return
+      pendingAtCleanupRef.current = false
+
+      // 1) 精准删除：尝试删除“刚插入”的 @（基于触发时的 range）
+      const atRange = atInsertRangeRef.current
+      if (atRange) {
+        try {
+          const container = atRange.startContainer
+          const offset = atRange.startOffset
+
+          // A) @ 被插入到同一个 Text 节点里
+          if (container.nodeType === Node.TEXT_NODE) {
+            const textNode = container as Text
+            const text = textNode.data || ''
+            if (offset < text.length && text[offset] === '@') {
+              textNode.deleteData(offset, 1)
+            }
+          } else if (container.nodeType === Node.ELEMENT_NODE) {
+            // B) @ 作为独立 Text 节点插入到元素子节点位置
+            const element = container as Element
+            const nodeAtOffset = element.childNodes[offset]
+            if (nodeAtOffset && nodeAtOffset.nodeType === Node.TEXT_NODE) {
+              const textNode = nodeAtOffset as Text
+              if ((textNode.data || '').startsWith('@')) {
+                textNode.deleteData(0, 1)
+              }
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      // 2) 兜底删除：光标前一个字符是 @
+      removeAtBeforeCaretIfAny()
+
+      // 3) 兜底删除：末尾多出来一个 @
+      const el = editorRef.current
+      if (el) {
+        // 只要是 “打开 mention 的那一下” 产生的 @，这里一律清理（@ 作为保留字符）
+        sanitizeStrayAtCharacters()
+
+        const text = el.innerText || ''
+        if (text.endsWith('@')) {
+          el.innerText = text.slice(0, -1)
+          const selection = window.getSelection()
+          if (selection) {
+            const range = document.createRange()
+            range.selectNodeContents(el)
+            range.collapse(false)
+            selection.removeAllRanges()
+            selection.addRange(range)
+            selectionRangeRef.current = range.cloneRange()
+          }
+        }
+        updateTextFromDom()
+      }
+    }
+
+    // 某些输入法会在 keydown 之后才触发插入，因此做两次：microtask + 下一帧
+    queueMicrotask(cleanup)
+    requestAnimationFrame(cleanup)
+  }
+
+  function addLinkedFileAndInsert(file: MarkdownFile) {
+    addLinkedFile(file)
+    insertFileMention(file)
+  }
+
+  function updateTextFromDom() {
+    const el = editorRef.current
+    if (!el) return
+    const parts: string[] = []
+
+    el.childNodes.forEach((node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        parts.push(node.textContent || '')
+        return
+      }
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const element = node as HTMLElement
+        if (element.dataset.mention === 'file') {
+          // mention 不污染输入：不把 @file 写进发送给 AI 的文本，只作为 UI 标记
+          parts.push('')
+          return
+        }
+        parts.push(element.textContent || '')
+      }
+    })
+
+    setText(parts.join('').replace(/\u00A0/g, ' '))
+  }
+
+  function setContentText(next: string) {
+    setText(next)
+    const el = editorRef.current
+    if (el) {
+      el.innerText = next
+    }
+  }
 
   return (
     <footer className="flex flex-col w-full p-1 justify-between items-center">
-      <LinkedFileDisplay
-        linkedFile={linkedFile}
-        onFileRemove={removeLinkedFile}
-      />
       <div className="group relative flex flex-col border rounded-xl z-10 gap-2 p-1 w-full bg-background focus-within:border-primary transition-colors">
-        <div className="relative w-full flex items-start">
-          <Textarea
-            className="flex-1 p-2 relative border-none text-xs placeholder:text-xs md:placeholder:text-sm md:text-sm focus-visible:ring-0 shadow-none min-h-[36px] max-h-[240px] resize-none overflow-y-auto"
-            rows={1}
-            disabled={!primaryModel || loading}
-            value={text}
-            onChange={(e) => {
-              setText(e.target.value)
-              const textarea = e.target
-              textarea.style.height = 'auto'
-              const newHeight = Math.min(textarea.scrollHeight, 240)
-              textarea.style.height = `${newHeight}px`
+        <div className="relative w-full flex items-start px-2 pt-2">
+          <div
+            ref={editorRef}
+            className="chat-input-ce flex-1 text-xs md:text-sm outline-none min-h-[72px] max-h-[240px] overflow-y-auto whitespace-pre-wrap break-words"
+            contentEditable={!loading && !!primaryModel}
+            suppressContentEditableWarning
+            data-placeholder={placeholder}
+            data-empty={text.trim() === '' && linkedFiles.length === 0 ? 'true' : 'false'}
+            onBeforeInput={(e) => {
+              if (loading || !primaryModel) return
+              const native = e.nativeEvent as unknown as InputEvent
+              if (native?.inputType === 'insertText' && native.data === '@') {
+                e.preventDefault()
+                mentionOpeningRef.current = true
+                // 保留当前光标位置
+                const selection = window.getSelection()
+                if (selection && selection.rangeCount > 0) {
+                  selectionRangeRef.current = selection.getRangeAt(0).cloneRange()
+                  atInsertRangeRef.current = selection.getRangeAt(0).cloneRange()
+                }
+                scheduleAtCleanup()
+                setShowFileSelector(true)
+              }
             }}
-            placeholder={placeholder}
+            onInput={() => {
+              // 如果正在打开 @mention，确保 stray @ 不污染 inputValue
+              if (mentionOpeningRef.current) {
+                sanitizeStrayAtCharacters()
+              }
+              updateTextFromDom()
+            }}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !isComposing && !e.shiftKey && e.keyCode === 13) {
+              // 保存光标位置（用于 @ 文件选择器后插入）
+              const selection = window.getSelection()
+              if (selection && selection.rangeCount > 0) {
+                selectionRangeRef.current = selection.getRangeAt(0).cloneRange()
+              }
+
+              // 某些键盘布局/输入法下，@ 可能表现为 Shift+2（e.key='2', e.code='Digit2'）
+              const isAt =
+                e.key === '@' ||
+                (e.shiftKey && (e.key === '2' || e.code === 'Digit2'))
+
+              if (isAt) {
+                e.preventDefault()
+                mentionOpeningRef.current = true
+                // 记录 @ 将要插入的位置（用于后续精准删除）
+                const selection = window.getSelection()
+                if (selection && selection.rangeCount > 0) {
+                  atInsertRangeRef.current = selection.getRangeAt(0).cloneRange()
+                }
+                scheduleAtCleanup()
+                setShowFileSelector(true)
+                return
+              }
+
+              if (e.key === "Enter" && !isComposing && !e.shiftKey) {
                 e.preventDefault()
                 chatSendRef.current?.sendChat()
+                return
               }
+
               if (e.key === "Tab") {
                 e.preventDefault()
                 insertPlaceholder()
+                return
               }
+
               if (e.key === "ArrowUp" && !isComposing) {
                 e.preventDefault()
                 navigateHistory('up')
+                return
               }
+
               if (e.key === "ArrowDown" && !isComposing) {
                 e.preventDefault()
                 navigateHistory('down')
-              }
-              if (e.key === "Backspace") {
-                if (text === '') {
-                  setPlaceholder(t('record.chat.input.placeholder.default'))
-                }
+                return
               }
             }}
             onCompositionStart={() => setIsComposing(true)}
-            onCompositionEnd={() => setTimeout(() => {
-              setIsComposing(false)
-            }, 0)}
+            onCompositionEnd={() => setTimeout(() => setIsComposing(false), 0)}
+            onFocus={() => {
+              const selection = window.getSelection()
+              if (selection && selection.rangeCount > 0) {
+                selectionRangeRef.current = selection.getRangeAt(0).cloneRange()
+              }
+            }}
+            onBlur={() => {
+              const selection = window.getSelection()
+              if (selection && selection.rangeCount > 0) {
+                selectionRangeRef.current = selection.getRangeAt(0).cloneRange()
+              }
+            }}
           />
         </div>
         
@@ -355,7 +564,7 @@ export function ChatInput() {
           </div>
           <div className="flex items-center justify-end gap-2 pr-1">
             <ChatModeSelect />
-            <ChatSend inputValue={text} onSent={handleSent} linkedFile={linkedFile} ref={chatSendRef} />
+            <ChatSend inputValue={text} onSent={handleSent} linkedFiles={linkedFiles} ref={chatSendRef} />
           </div>
         </div>
 
@@ -363,9 +572,13 @@ export function ChatInput() {
         {showFileSelector && (
           <FileSelector
             isOpen={showFileSelector}
-            onClose={() => setShowFileSelector(false)}
+            onClose={() => {
+              mentionOpeningRef.current = false
+              setShowFileSelector(false)
+            }}
             onFileSelect={(file) => {
-              setLinkedFile(file)
+              addLinkedFileAndInsert(file)
+              mentionOpeningRef.current = false
               setShowFileSelector(false)
             }}
           />

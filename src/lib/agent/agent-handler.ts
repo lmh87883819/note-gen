@@ -20,7 +20,7 @@ export class AgentHandler {
     this.config = config
   }
 
-  async execute(userInput: string, context?: string): Promise<string> {
+  async execute(userInput: string, context?: string, attachments?: { imageUrls?: string[] }): Promise<string> {
     const store = useChatStore.getState()
     const runId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
     
@@ -79,7 +79,7 @@ export class AgentHandler {
     this.agent = new ReActAgent(reactConfig)
 
     try {
-      const result = await this.agent.run(userInput, context)
+      const result = await this.agent.run(userInput, context, attachments)
       store.setAgentState({ isRunning: false, phase: result === '' ? 'stopped' : 'completed' })
       
       // 如果结果为空字符串，说明被用户终止

@@ -18,7 +18,7 @@ import ChatPlaceholder from "./chat-placeholder"
 import { ClearContext } from "./clear-context"
 import { ClearChat } from "./clear-chat"
 import { ChatModeSelect } from "./chat-mode-select"
-import { MarkdownFile } from "@/lib/files"
+import { WorkspaceFile } from "@/lib/files"
 import emitter from "@/lib/emitter"
 import { useIsMobile } from '@/hooks/use-mobile'
 import {
@@ -48,7 +48,7 @@ export function ChatInput() {
   const t = useTranslations()
   const [inputHistory, setInputHistory] = useLocalStorage<string[]>('chat-input-history', [])
   const [historyIndex, setHistoryIndex] = useState(-1)
-  const [linkedFiles, setLinkedFiles] = useState<MarkdownFile[]>([])
+  const [linkedFiles, setLinkedFiles] = useState<WorkspaceFile[]>([])
   const chatSendRef = useRef<any>(null)
   const isMobile = useIsMobile()
   const editorRef = useRef<HTMLDivElement | null>(null)
@@ -195,7 +195,7 @@ export function ChatInput() {
       setContentText(event as string)
     })
     emitter.on('fileSelected', (event: unknown) => {
-      addLinkedFileAndInsert(event as MarkdownFile)
+      addLinkedFileAndInsert(event as WorkspaceFile)
     })
     return () => {
       emitter.off('revertChat')
@@ -203,11 +203,11 @@ export function ChatInput() {
     }
   }, [])
 
-  function normalizeFilePathForMention(file: MarkdownFile) {
+  function normalizeFilePathForMention(file: WorkspaceFile) {
     return file.relativePath || file.name || file.path
   }
 
-  function addLinkedFile(file: MarkdownFile) {
+  function addLinkedFile(file: WorkspaceFile) {
     const key = normalizeFilePathForMention(file)
     setLinkedFiles((prev) => {
       if (prev.some(f => normalizeFilePathForMention(f) === key)) return prev
@@ -215,7 +215,7 @@ export function ChatInput() {
     })
   }
 
-  function insertFileMention(file: MarkdownFile) {
+  function insertFileMention(file: WorkspaceFile) {
     const el = editorRef.current
     if (!el) return
 
@@ -361,7 +361,7 @@ export function ChatInput() {
     requestAnimationFrame(cleanup)
   }
 
-  function addLinkedFileAndInsert(file: MarkdownFile) {
+  function addLinkedFileAndInsert(file: WorkspaceFile) {
     addLinkedFile(file)
     insertFileMention(file)
   }

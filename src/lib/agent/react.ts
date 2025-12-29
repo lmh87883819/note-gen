@@ -51,7 +51,7 @@ export class ReActAgent {
     }
   }
 
-  async run(userInput: string, context?: string): Promise<string> {
+  async run(userInput: string, context?: string, attachments?: { imageUrls?: string[] }): Promise<string> {
     this.steps = []
     this.currentIteration = 0
     this.toolCallCounter = 0
@@ -75,11 +75,18 @@ export class ReActAgent {
       this.config.onPlan?.(plan)
     }
 
+    const initialUserContent: any = attachments?.imageUrls && attachments.imageUrls.length > 0
+      ? ([
+          { type: 'text', text: userInput },
+          ...attachments.imageUrls.map(url => ({ type: 'image_url', image_url: { url } }))
+        ])
+      : userInput
+
     let messages: any[] = [
       { role: 'system', content: systemPrompt },
       ...(plan.length ? [{ role: 'system', content: `执行计划：\n${plan.map((p, i) => `${i + 1}. ${p}`).join('\n')}` }] : []),
       ...(context ? [{ role: 'system', content: `上下文信息：\n${context}` }] : []),
-      { role: 'user', content: userInput },
+      { role: 'user', content: initialUserContent },
     ]
 
     let finalAnswer = ''

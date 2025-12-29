@@ -4,19 +4,19 @@ import { useState, useEffect, useRef } from "react"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { FileText } from "lucide-react"
-import { getAllMarkdownFiles, MarkdownFile } from "@/lib/files"
+import { getAllWorkspaceFiles, WorkspaceFile } from "@/lib/files"
 import { cn } from "@/lib/utils"
 import { useTranslations } from 'next-intl'
 
 interface FileSelectorProps {
-  onFileSelect: (file: MarkdownFile) => void
+  onFileSelect: (file: WorkspaceFile) => void
   onClose: () => void
   isOpen: boolean
 }
 
 export function FileSelector({ onFileSelect, onClose, isOpen }: FileSelectorProps) {
-  const [files, setFiles] = useState<MarkdownFile[]>([])
-  const [filteredFiles, setFilteredFiles] = useState<MarkdownFile[]>([])
+  const [files, setFiles] = useState<WorkspaceFile[]>([])
+  const [filteredFiles, setFilteredFiles] = useState<WorkspaceFile[]>([])
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -53,7 +53,7 @@ export function FileSelector({ onFileSelect, onClose, isOpen }: FileSelectorProp
   const loadFiles = async () => {
     setLoading(true)
     try {
-      const allFiles = await getAllMarkdownFiles()
+      const allFiles = await getAllWorkspaceFiles()
       setFiles(allFiles)
       setFilteredFiles(allFiles)
     } catch (error) {
@@ -81,7 +81,7 @@ export function FileSelector({ onFileSelect, onClose, isOpen }: FileSelectorProp
     }
   }
 
-  const handleFileSelect = (file: MarkdownFile) => {
+  const handleFileSelect = (file: WorkspaceFile) => {
     onFileSelect(file)
     onClose()
     setSearchQuery("")

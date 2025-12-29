@@ -385,7 +385,10 @@ export async function rerankDocuments(
 /**
  * 为不同AI类型准备消息
  */
-async function prepareMessages(text: string, includeLanguage = false): Promise<{
+async function prepareMessages(
+  content: OpenAI.Chat.ChatCompletionUserMessageParam['content'],
+  includeLanguage = false
+): Promise<{
   messages: OpenAI.Chat.ChatCompletionMessageParam[],
   geminiText?: string
 }> {
@@ -411,7 +414,7 @@ async function prepareMessages(text: string, includeLanguage = false): Promise<{
   
   messages.push({
     role: 'user',
-    content: text
+    content
   })
   
   return { messages, geminiText }
@@ -492,7 +495,7 @@ export async function fetchAi(text: string): Promise<string> {
  * @param chatId 当前chat ID，用于关联MCP工具调用记录（可选）
  */
 export async function fetchAiStream(
-  text: string, 
+  text: OpenAI.Chat.ChatCompletionUserMessageParam['content'],
   onUpdate: (content: string) => void, 
   abortSignal?: AbortSignal,
   mcpTools?: any[],

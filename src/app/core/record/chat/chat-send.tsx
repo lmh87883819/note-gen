@@ -9,7 +9,7 @@ import { useTranslations } from "next-intl"
 import useVectorStore from "@/stores/vector"
 import { getContextForQuery } from '@/lib/rag'
 import { invoke } from "@tauri-apps/api/core"
-import { MarkdownFile } from "@/lib/files"
+import { WorkspaceFile } from "@/lib/files"
 import { readTextFile } from "@tauri-apps/plugin-fs"
 import { getFilePathOptions, getWorkspacePath } from "@/lib/workspace"
 import { useMcpStore } from "@/stores/mcp"
@@ -19,7 +19,7 @@ import { AgentHandler } from "@/lib/agent/agent-handler"
 interface ChatSendProps {
   inputValue: string;
   onSent?: () => void;
-  linkedFiles?: MarkdownFile[];
+  linkedFiles?: WorkspaceFile[];
 }
 
 export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ inputValue, onSent, linkedFiles }, ref) => {
@@ -48,7 +48,8 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
     if (!placeholderMessage) return
 
     // Agent 上下文：把 @ 引用的文件内容作为 context 传入（避免污染用户输入本身）
-    const agentContext = await buildLinkedFilesContext(linkedFiles)
+    const attachments = await buildLinkedFileAttachments(linkedFiles)
+    const agentContext = attachments.textContext
 
     // 每次都创建新的 AgentHandler，使用当前的 placeholderMessage
     const agentHandler = new AgentHandler({
@@ -93,7 +94,7 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
     agentHandlerRef.current = agentHandler
 
     try {
-      await agentHandler.execute(inputValue, agentContext || undefined)
+      await agentHandler.execute(inputValue, agentContext || undefined, { imageUrls: attachments.imageUrls })
     } catch (error) {
       console.error('Agent execution error:', error)
     } finally {
@@ -146,7 +147,8 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
     // 准备请求内容
     let ragContext = ''
     let ragSources: string[] = []
-    const linkedFilesContent = await buildLinkedFilesContext(linkedFiles)
+    const attachments = await buildLinkedFileAttachments(linkedFiles)
+    const linkedFilesContent = attachments.textContext
     
     // 如果启用RAG，获取相关上下文
     if (isRagEnabled) {
@@ -200,10 +202,17 @@ ${ragContext}
       mcpTools = getOpenAIFunctions(selectedServerIds)
     }
     
-    // 使用流式方式获取AI结果
+    // 使用流式方式获取AI结果（多模态：图片以 content parts 传入）
     let cache_content = '';
     try {
-      await fetchAiStream(request_content, async (content) => {
+      const userContent: any = attachments.imageUrls.length
+        ? ([
+            { type: 'text', text: request_content },
+            ...attachments.imageUrls.map(url => ({ type: 'image_url', image_url: { url } }))
+          ])
+        : request_content
+
+      await fetchAiStream(userContent, async (content) => {
         cache_content = content
         // 每次收到流式内容时更新消息
         await saveChat({
@@ -270,37 +279,119 @@ ${ragContext}
 
 ChatSend.displayName = 'ChatSend';
 
-async function buildLinkedFilesContext(linkedFiles?: MarkdownFile[]): Promise<string> {
-  if (!linkedFiles || linkedFiles.length === 0) return ''
+async function buildLinkedFileAttachments(linkedFiles?: WorkspaceFile[]): Promise<{
+  textContext: string
+  imageUrls: string[]
+}> {
+  if (!linkedFiles || linkedFiles.length === 0) return { textContext: '', imageUrls: [] }
+
+  const fileContents: string[] = []
+  const imageUrls: string[] = []
 
   try {
     const workspace = await getWorkspacePath()
-    const fileContents: string[] = []
 
     for (const file of linkedFiles) {
+      const ext = (file.name.split('.').pop() || '').toLowerCase()
+      const isImage = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg'].includes(ext)
+
       try {
-        let content = ''
-        if (workspace.isCustom) {
-          content = await readTextFile(file.path)
-        } else {
-          const { path, baseDir } = await getFilePathOptions(file.path)
-          content = await readTextFile(path, { baseDir })
+        if (isImage) {
+          const bytes = await readWorkspaceFileBytes(workspace.isCustom, file.path)
+          if (!bytes) {
+            fileContents.push(`[Image] ${file.relativePath} (无法读取)`)
+            continue
+          }
+
+          const maxBytes = 4 * 1024 * 1024
+          if (bytes.length > maxBytes) {
+            fileContents.push(`[Image] ${file.relativePath} (${Math.round(bytes.length / 1024 / 1024)}MB，过大未附加)`)
+            continue
+          }
+
+          const mime = ext === 'jpg' ? 'image/jpeg'
+            : ext === 'jpeg' ? 'image/jpeg'
+            : ext === 'png' ? 'image/png'
+            : ext === 'webp' ? 'image/webp'
+            : ext === 'gif' ? 'image/gif'
+            : ext === 'bmp' ? 'image/bmp'
+            : ext === 'svg' ? 'image/svg+xml'
+            : 'application/octet-stream'
+
+          const base64 = uint8ToBase64(bytes)
+          imageUrls.push(`data:${mime};base64,${base64}`)
+          fileContents.push(`[Image attached] ${file.relativePath}`)
+          continue
         }
 
+        // 文本优先：能读就作为上下文传入
+        const content = await readWorkspaceFileText(workspace.isCustom, file.path)
         if (content) {
           fileContents.push(`
 The following is the content of the linked file "${file.name}" (${file.relativePath}):
 ${content}
 `.trim())
+          continue
         }
+
+        // 二进制兜底：附加元信息 + 截断 base64（避免爆 prompt）
+        const bytes = await readWorkspaceFileBytes(workspace.isCustom, file.path)
+        if (!bytes) {
+          fileContents.push(`[Binary file] ${file.relativePath} (无法读取)`)
+          continue
+        }
+
+        const cap = 128 * 1024
+        const capped = bytes.slice(0, Math.min(bytes.length, cap))
+        const base64 = uint8ToBase64(capped)
+        fileContents.push(`
+[Binary file attached (base64, first ${capped.length} bytes / total ${bytes.length} bytes)]
+File: ${file.relativePath}
+Base64: ${base64}
+`.trim())
       } catch (error) {
         console.error('Failed to read linked file:', file, error)
       }
     }
 
-    return fileContents.join('\n\n')
+    return { textContext: fileContents.join('\n\n'), imageUrls }
   } catch (error) {
-    console.error('Failed to read linked files:', error)
+    console.error('Failed to build linked file attachments:', error)
+    return { textContext: '', imageUrls: [] }
+  }
+}
+
+async function readWorkspaceFileText(isCustom: boolean, path: string): Promise<string> {
+  try {
+    if (isCustom) {
+      return await readTextFile(path)
+    }
+    const { path: p, baseDir } = await getFilePathOptions(path)
+    return await readTextFile(p, { baseDir })
+  } catch {
     return ''
   }
+}
+
+async function readWorkspaceFileBytes(isCustom: boolean, path: string): Promise<Uint8Array | null> {
+  try {
+    const { readFile } = await import('@tauri-apps/plugin-fs')
+    if (isCustom) {
+      return await readFile(path)
+    }
+    const { path: p, baseDir } = await getFilePathOptions(path)
+    return await readFile(p, { baseDir })
+  } catch {
+    return null
+  }
+}
+
+function uint8ToBase64(bytes: Uint8Array): string {
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize)
+    binary += String.fromCharCode(...chunk)
+  }
+  return btoa(binary)
 }

@@ -24,7 +24,6 @@ import { ImageUp } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { open } from "@tauri-apps/plugin-shell";
 import { Textarea } from "@/components/ui/textarea";
-import { AudioPlayer } from "@/components/audio-player";
 import { ImageViewer } from "@/components/image-viewer";
 import ChatPreview from "../chat/chat-preview";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -77,7 +76,7 @@ function DetailViewer({mark, content, path}: {mark: Mark, content: string, path?
         </SheetHeader>
         <div className="h-[calc(100vh-88px)] overflow-y-auto md:p-8 p-2">
           {
-            mark.url && (mark.type === 'image' || mark.type === 'scan') ?
+            mark.url && mark.type === 'image' ?
             <LocalImage
               src={mark.url.includes('http') ? mark.url : `/${path}/${mark.url}`}
               alt=""
@@ -114,18 +113,6 @@ export function MarkWrapper({mark}: {mark: Mark}) {
 
   const renderContent = () => {
     switch (mark.type) {
-    case 'scan':
-    return (
-        <div className="flex-1 overflow-hidden text-xs pr-10 md:pr-2">
-          <div className="flex w-full items-center gap-2 text-zinc-500">
-            <span className="flex items-center gap-1 bg-cyan-900 text-white px-1 rounded text-xs">
-              {t(mark.type)}
-            </span>
-            <span className="ml-auto text-xs">{dayjs(mark.createdAt).fromNow()}</span>
-          </div>
-          <DetailViewer mark={mark} content={mark.desc || ''} path="screenshot" />
-        </div>
-    )
     case 'image':
     return (
         <div className="flex-1 overflow-hidden text-xs pr-10 md:pr-2">
@@ -173,23 +160,6 @@ export function MarkWrapper({mark}: {mark: Mark}) {
             <DetailViewer mark={mark} content={mark.content || ''} />
           </div>
       )
-    case 'recording':
-      return (
-          <div className="flex-1 pr-10 md:pr-0">
-            <div className="flex w-full items-center gap-2 text-zinc-500 text-xs">
-              <span className="flex items-center gap-1 bg-red-900 text-white px-1 rounded">
-                {t(mark.type)}
-              </span>
-              <span className="ml-auto text-xs">{dayjs(mark.createdAt).fromNow()}</span>
-            </div>
-            <DetailViewer mark={mark} content={mark.content || ''} />
-            {mark.url && (
-              <div className="mt-2">
-                <AudioPlayer audioPath={mark.url} />
-              </div>
-            )}
-          </div>
-      )
     case 'file':
       return (
           <div className="flex-1 pr-10 md:pr-0">
@@ -227,9 +197,9 @@ export function MarkWrapper({mark}: {mark: Mark}) {
       <div className="flex-1 min-w-0">
         {renderContent()}
       </div>
-      {(mark.type === 'scan' || mark.type === 'image') && (
+      {mark.type === 'image' && (
         <div className="bg-zinc-900 flex items-center justify-center ml-2">
-          <ImageViewer url={mark.url} path={mark.type === 'scan' ? 'screenshot' : 'image'} />
+          <ImageViewer url={mark.url} path="image" />
         </div>
       )}
     </div>
@@ -348,19 +318,17 @@ export function MarkItem({mark}: {mark: Mark}) {
   async function handelShowInFolder(e?: React.MouseEvent) {
     e?.stopPropagation()
     const appDir = await appDataDir()
-    const path = mark.type === 'scan' ? 'screenshot' : 'image'
-    open(`${appDir}/${path}`)
+    open(`${appDir}/image`)
   }
 
   async function handelShowInFile(e?: React.MouseEvent) {
     e?.stopPropagation()
     const appDir = await appDataDir()
-    const path = mark.type === 'scan' ? 'screenshot' : 'image'
     let filename = mark.url
     if (mark.url.includes('http')) {
       filename = mark.url.split('/').pop() || '';
     }
-    open(`${appDir}/${path}/${filename}`)
+    open(`${appDir}/image/${filename}`)
   }
 
   async function handleCopyLink(e?: React.MouseEvent) {
@@ -427,9 +395,6 @@ export function MarkItem({mark}: {mark: Mark}) {
             </ContextMenuSubContent>
           </ContextMenuSub>
         }
-        <ContextMenuItem inset disabled={isMultiSelectMode || true}>
-          {t('record.mark.toolbar.convertTo', { type: mark.type === 'scan' ? t('record.mark.type.image') : t('record.mark.type.screenshot') })}
-        </ContextMenuItem>
         <ContextMenuItem inset disabled={isMultiSelectMode || !mark.url} onClick={handleCopyLink}>
           {t('record.mark.toolbar.copyLink')}
         </ContextMenuItem>

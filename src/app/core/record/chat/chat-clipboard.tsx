@@ -2,11 +2,8 @@
 import { useState, useEffect } from 'react';
 import { BaseDirectory, copyFile, exists, mkdir, readFile } from '@tauri-apps/plugin-fs';
 import useTagStore from "@/stores/tag";
-import useSettingStore from "@/stores/setting";
 import useMarkStore from "@/stores/mark";
 import { v4 as uuid } from 'uuid'
-import ocr from "@/lib/ocr";
-import { fetchAiDesc, fetchAiDescByImage } from "@/lib/ai";
 import { insertMark, Mark } from "@/db/marks";
 import { CheckCircle, Highlighter, ImagePlus, LoaderCircle } from "lucide-react";
 import { Chat } from "@/db/chats";
@@ -23,7 +20,6 @@ export function ChatClipboard({chat}: { chat: Chat }) {
   const [countdown, setCountdown] = useState(5) // 5 seconds countdown
   const [isCountingDown, setIsCountingDown] = useState(!chat.inserted) // Start countdown if not recorded
   const { currentTagId, fetchTags, getCurrentTag } = useTagStore()
-  const { primaryModel, primaryImageMethod, enableImageRecognition } = useSettingStore()
   const { fetchMarks, addQueue, setQueue, removeQueue } = useMarkStore()
   const { updateInsert, deleteChat } = useChatStore()
   const t = useTranslations('record.queue')
@@ -74,38 +70,13 @@ export function ChatClipboard({chat}: { chat: Chat }) {
     const fromPath = chat.image.slice(1)
     const toPath = `image/${queueId}.png`
     await copyFile(fromPath, toPath, { fromPathBaseDir: BaseDirectory.AppData, toPathBaseDir: BaseDirectory.AppData})
-    let content = ''
-    let desc = ''
-    
-    // Skip image recognition if disabled
-    if (!enableImageRecognition) {
-      setQueue(queueId, { progress: t('save') });
-      content = ''
-      desc = ''
-    } else if (primaryImageMethod === 'vlm') {
-      // 使用 VLM 识别图片
-      setQueue(queueId, { progress: t('ai') });
-      const file = await readFile(toPath, { baseDir: BaseDirectory.AppData })
-      const base64 = `data:image/png;base64,${Buffer.from(file).toString('base64')}`
-      content = await fetchAiDescByImage(base64) || 'VLM Error'
-      desc = content
-    } else {
-      // 使用 OCR 识别图片
-      setQueue(queueId, { progress: t('ocr') });
-      content = await ocr(toPath)
-      setQueue(queueId, { progress: t('ai') });
-      if (primaryModel) {
-        desc = await fetchAiDesc(content).then(res => res ? res : content) || content
-      } else {
-        desc = content
-      }
-    }
+    setQueue(queueId, { progress: t('save') });
     const mark: Partial<Mark> = {
       tagId: currentTagId,
       type: 'image',
-      content,
+      content: '',
       url: `${queueId}.png`,
-      desc,
+      desc: '',
     }
     setQueue(queueId, { progress: t('upload') });
     const fileData = await readFile(toPath, { baseDir: BaseDirectory.AppData  })

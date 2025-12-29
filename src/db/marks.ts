@@ -4,7 +4,7 @@ import { BaseDirectory, exists, mkdir } from "@tauri-apps/plugin-fs"
 export interface Mark {
   id: number
   tagId: number
-  type: 'scan' | 'text' | 'image' | 'link' | 'file' | 'recording'
+  type: 'text' | 'image' | 'link' | 'file'
   content?: string
   desc?: string
   url: string
@@ -15,9 +15,9 @@ export interface Mark {
 
 // 创建 marks 表
 export async function initMarksDb() {
-  const isExist = await exists('screenshot', { baseDir: BaseDirectory.AppData})
+  const isExist = await exists('image', { baseDir: BaseDirectory.AppData})
   if (!isExist) {
-    await mkdir('screenshot', { baseDir: BaseDirectory.AppData})
+    await mkdir('image', { baseDir: BaseDirectory.AppData})
   }
   const db = await getDb()
   await db.execute(`

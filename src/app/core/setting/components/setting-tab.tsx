@@ -8,7 +8,9 @@ import useSettingStore from "@/stores/setting"
 import { Separator } from "@/components/ui/separator";
 
 export function SettingTab() {
-  const [currentPage, setCurrentPage] = useState('about')
+  const defaultAnchor =
+    typeof baseConfig[0] === 'string' ? 'general' : baseConfig[0].anchor
+  const [currentPage, setCurrentPage] = useState(defaultAnchor)
   const router = useRouter()
   const pathname = usePathname()
   const t = useTranslations('settings')

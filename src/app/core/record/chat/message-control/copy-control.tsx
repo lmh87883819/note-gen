@@ -3,7 +3,6 @@ import { Chat } from "@/db/chats"
 import { Copy, Check } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { useState } from "react"
-import { writeText } from "tauri-plugin-clipboard-api"
 
 interface CopyControlProps {
   chat: Chat
@@ -33,7 +32,7 @@ export function CopyControl({ chat, translatedContent }: CopyControlProps) {
         return
       }
       
-      await writeText(textToCopy)
+      await navigator.clipboard.writeText(textToCopy)
       setIsCopied(true)
       
       // 2秒后重置复制状态

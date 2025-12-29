@@ -1,4 +1,4 @@
-import { Bot, NotebookPen, Clipboard, Link } from 'lucide-react'
+import { Bot, NotebookPen, Link } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 export default function ChatEmpty() {
@@ -14,11 +14,6 @@ export default function ChatEmpty() {
       content: <p>已与你的记录<b>关联</b></p>,
       icon: <Link className='size-4' />,
       translation: t('empty.features.1.linked')
-    },
-    {
-      content: <p>识别<b>剪贴板</b>记录</p>,
-      icon: <Clipboard className='size-4' />,
-      translation: t('empty.features.2.clipboard')
     },
     {
       content: <p>将你的记录<b>整理</b>为笔记</p>,

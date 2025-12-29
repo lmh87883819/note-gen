@@ -363,8 +363,8 @@ export function TagManage() {
                     {/* 显示已完成的记录 - 过滤掉没有内容的图片记录 */}
                     {(() => {
                       const filteredMarks = getTagMarks(tag.id).filter(mark => {
-                        // 如果是图片类型（scan 或 image），只显示有内容或描述的
-                        if (mark.type === 'image' || mark.type === 'scan') {
+                        // 如果是图片类型，只显示有内容或描述的
+                        if (mark.type === 'image') {
                           return mark.content && mark.content.trim() !== ''
                         }
                         // 其他类型的记录正常显示

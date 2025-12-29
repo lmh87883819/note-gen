@@ -1,44 +1,25 @@
 import {
   BotMessageSquare,
-  LayoutTemplate,
-  ScanText,
-  Store,
-  UserRoundCog,
   Drama,
+  UserRoundCog,
   FolderOpen,
   Package,
-  Database,
-  DatabaseBackup,
   ImageUp,
   FileCog,
   Book,
-  KeyboardIcon,
-  Volume2,
   Settings,
   Puzzle
 } from "lucide-react"
 
 const baseConfig = [
   {
-    icon: <Store className="size-4 md:size-6" />,
-    anchor: 'about',
-  },
-  {
     icon: <Settings className="size-4 md:size-6" />,
     anchor: 'general',
   },
   '-',
   {
-    icon: <DatabaseBackup className="size-4 md:size-6" />,
-    anchor: 'sync',
-  },
-  {
     icon: <ImageUp className="size-4 md:size-6" />,
     anchor: 'imageHosting',
-  },
-  {
-    icon: <Database className="size-4 md:size-6" />,
-    anchor: 'backupSync',
   },
   '-',
   {
@@ -61,10 +42,6 @@ const baseConfig = [
     icon: <Drama className="size-4 md:size-6" />,
     anchor: 'prompt',
   },
-  {
-    icon: <LayoutTemplate className="size-4 md:size-6" />,
-    anchor: 'template',
-  },
   '-',
   {
     icon: <FolderOpen className="size-4 md:size-6" />,
@@ -73,18 +50,6 @@ const baseConfig = [
   {
     icon: <FileCog className="size-4 md:size-6" />,
     anchor: 'editor',
-  },
-  {
-    icon: <KeyboardIcon className="size-4 md:size-6" />,
-    anchor: 'shortcuts',
-  },
-  {
-    icon: <ScanText className="size-4 md:size-6" />,
-    anchor: 'imageMethod',
-  },
-  {
-    icon: <Volume2 className="size-4 md:size-6" />,
-    anchor: 'audio',
   },
   '-',
   {
@@ -95,7 +60,7 @@ const baseConfig = [
 
 export default baseConfig
 
-export type ModelType = 'chat' | 'image' | 'video' | 'tts' | 'stt' | 'embedding' | 'rerank';
+export type ModelType = 'chat' | 'image' | 'video' | 'embedding' | 'rerank';
 
 export interface ModelConfig {
   id: string
@@ -103,7 +68,6 @@ export interface ModelConfig {
   modelType: ModelType
   temperature?: number
   topP?: number
-  voice?: string
   enableStream?: boolean
 }
 
@@ -121,8 +85,6 @@ export interface AiConfig {
   temperature?: number
   topP?: number
   modelType?: ModelType
-  voice?: string
-  speed?: number
   enableStream?: boolean
 }
 

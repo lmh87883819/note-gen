@@ -170,7 +170,6 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
     if (!message) return
 
     await fetchMarks()
-    const scanMarks = isLinkMark ? marks.filter(item => item.type === 'scan') : []
     const textMarks = isLinkMark ? marks.filter(item => item.type === 'text') : []
     const imageMarks = isLinkMark ? marks.filter(item => item.type === 'image') : []
     const linkMarks = isLinkMark ? marks.filter(item => item.type === 'link') : []
@@ -228,9 +227,7 @@ ${ragContext}
     }
 
     const request_content = `
-      ${[...scanMarks, ...textMarks, ...imageMarks, ...fileMarks, ...linkMarks].length ? 'You can refer to the following content notes:' : ''}
-      ${scanMarks.length ? 'The following are screenshots after using OCR to identify text fragments:' : ''}
-      ${scanMarks.map((item, index) => `${index + 1}. ${item.content}`).join(';\n\n')}
+      ${[...textMarks, ...imageMarks, ...fileMarks, ...linkMarks].length ? 'You can refer to the following content notes:' : ''}
       ${textMarks.length ? 'The following are text copy records:' : ''}
       ${textMarks.map((item, index) => `${index + 1}. ${item.content}`).join(';\n\n')}
       ${imageMarks.length ? 'The following are image records:' : ''}

@@ -9,7 +9,6 @@ import { toast } from "@/hooks/use-toast";
 import { cloneDeep } from "lodash-es";
 import { computedParentPath, getCurrentFolder } from "@/lib/path";
 import useSettingStore from '@/stores/setting'
-import SyncFolder from './sync-folder'
 import { NewFile } from './new-file'
 import { NewFolder } from './new-folder'
 import { ViewDirectory } from './view-directory'
@@ -437,8 +436,6 @@ export function FolderItem({ item }: { item: DirTree }) {
           <CutFolder item={item} />
           <CopyFolder item={item} />
           <PasteInFolder item={item} />
-          <ContextMenuSeparator />
-          <SyncFolder item={item} />
           <ContextMenuSeparator />
           <RenameFolder item={item} onStartRename={handleStartRename} />
           <DeleteFolder item={item} />

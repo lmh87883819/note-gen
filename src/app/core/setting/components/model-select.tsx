@@ -33,7 +33,7 @@ interface GroupedModel {
 
 export function ModelSelect({modelKey}: {modelKey: string}) {
   const [groupedModels, setGroupedModels] = useState<GroupedModel[]>([])
-  const { setPlaceholderModel, setTranslateModel, setMarkDescModel, setPrimaryModel, setImageMethodModel, setAudioModel, setSttModel, setEmbeddingModel, setRerankingModel } = useSettingStore()
+  const { setPlaceholderModel, setTranslateModel, setMarkDescModel, setPrimaryModel, setEmbeddingModel, setRerankingModel } = useSettingStore()
   const [model, setModel] = useState<string>('')
   const [open, setOpen] = React.useState(false)
   const t = useTranslations('settings.defaultModel')
@@ -43,19 +43,12 @@ export function ModelSelect({modelKey}: {modelKey: string}) {
     switch (modelKey) {
       case 'primaryModel':
         return 'primaryModel'
-      case 'imageMethod':
-        return 'imageMethodModel'
       case 'placeholder':
         return 'placeholderModel'
       case 'translate':
         return 'translateModel'
       case 'markDesc':
         return 'markDescModel'
-      case 'audio':
-      case 'tts':
-        return 'audioModel'
-      case 'stt':
-        return 'sttModel'
       case 'embedding':
         return 'embeddingModel'
       case 'reranking':
@@ -71,9 +64,6 @@ export function ModelSelect({modelKey}: {modelKey: string}) {
       case 'primaryModel':
         setPrimaryModel(primaryModel)
         break;
-      case 'imageMethod':
-        setImageMethodModel(primaryModel)
-        break;
       case 'placeholder':
         setPlaceholderModel(primaryModel)
         break;
@@ -82,13 +72,6 @@ export function ModelSelect({modelKey}: {modelKey: string}) {
         break;
       case 'markDesc':
         setMarkDescModel(primaryModel)
-        break;
-      case 'audio':
-      case 'tts':
-        setAudioModel(primaryModel)
-        break;
-      case 'stt':
-        setSttModel(primaryModel)
         break;
       case 'embedding':
         setEmbeddingModel(primaryModel)
@@ -108,11 +91,6 @@ export function ModelSelect({modelKey}: {modelKey: string}) {
         return 'embedding'
       case 'reranking':
         return 'rerank'
-      case 'audio':
-      case 'tts':
-        return 'tts'
-      case 'stt':
-        return 'stt'
       default:
         return 'chat'
     }
@@ -154,7 +132,6 @@ export function ModelSelect({modelKey}: {modelKey: string}) {
               modelType: configModelType,
               temperature: config.temperature,
               topP: config.topP,
-              voice: config.voice,
               enableStream: config.enableStream
             }
           })

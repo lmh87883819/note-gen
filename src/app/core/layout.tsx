@@ -10,10 +10,7 @@ import en from "dayjs/locale/en";
 import { useI18n } from "@/hooks/useI18n"
 import useVectorStore from "@/stores/vector"
 import useImageStore from "@/stores/imageHosting"
-import useShortcutStore from "@/stores/shortcut"
-import initQuickRecordText from "@/lib/shortcut/quick-record-text"
 import { useRouter, usePathname } from "next/navigation"
-import initShowWindow from "@/lib/shortcut/show-window"
 import { initMcp } from "@/lib/mcp/init"
 import { SearchDialog } from "@/components/search-dialog"
 import { reportAppStart } from "@/lib/event-report"
@@ -28,7 +25,6 @@ export default function RootLayout({
   const { initSettingData, uiScale, customCss } = useSettingStore()
   const { initMainHosting } = useImageStore()
   const { currentLocale } = useI18n()
-  const { initShortcut } = useShortcutStore()
   const { initVectorDb } = useVectorStore()
   const router = useRouter()
   const pathname = usePathname()
@@ -51,10 +47,7 @@ export default function RootLayout({
     initSettingData()
     initMainHosting()
     initAllDatabases()
-    initShortcut()
     initVectorDb()
-    initQuickRecordText()
-    initShowWindow()
     initMcp()
     // 上报应用启动事件
     reportAppStart()

@@ -1,4 +1,3 @@
-import { fetchAi } from "@/lib/ai";
 import useArticleStore from "@/stores/article";
 import { Highlighter, Plus, ChevronDown, Tag } from "lucide-react";
 import { MarkWrapper } from "../../record/mark/mark-item";
@@ -7,7 +6,6 @@ import useMarkStore from "@/stores/mark";
 import { Button } from "@/components/ui/button";
 import { Mark, delMark } from "@/db/marks";
 import { TooltipButton } from "@/components/tooltip-button";
-import useSettingStore from "@/stores/setting";
 import Vditor from "vditor";
 import { useEffect, useState, useMemo } from "react";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
@@ -20,7 +18,6 @@ export default function MarkInsert({editor}: {editor?: Vditor}) {
   const [open, setOpen] = useState(false)
   const [openTags, setOpenTags] = useState<Record<number, boolean>>({})
   const { loading, setLoading } = useArticleStore()
-  const { primaryModel } = useSettingStore()
   const { allMarks, queues, fetchAllMarks } = useMarkStore()
   const { tags } = useTagStore()
   const t = useTranslations('article.editor.toolbar.mark')
@@ -67,13 +64,7 @@ export default function MarkInsert({editor}: {editor?: Vditor}) {
         editor?.insertValue(`![${mark.desc}](${mark.url})`)
         break;
       default:
-        if (primaryModel) {
-          const req = `这是一段 OCR 识别的结果：${mark.content}进行整理，直接返回整理后的结果。`
-          const res = await fetchAi(req)
-          editor?.insertValue(res)
-        } else {
-          editor?.insertValue(mark.content || t('ocrNoContent'))
-        }
+        editor?.insertValue(mark.content || '')
         break;
     }
     setLoading(false)

@@ -15,7 +15,6 @@ import {
   ServerCrash, 
   BookOpen, 
   Lightbulb, 
-  Clipboard, 
   Eraser, 
   Trash2,
   GripVertical
@@ -53,7 +52,6 @@ const TOOL_CONFIG_MAP: Record<string, { icon: React.ReactNode; labelKey: string 
   mcpButton: { icon: <ServerCrash className="size-4" />, labelKey: 'mcp.tooltip' },
   ragSwitch: { icon: <BookOpen className="size-4" />, labelKey: 'rag.enabled' },
   chatPlaceholder: { icon: <Lightbulb className="size-4" />, labelKey: 'placeholder.on' },
-  clipboardMonitor: { icon: <Clipboard className="size-4" />, labelKey: 'clipboardMonitor.enable' },
   clearContext: { icon: <Eraser className="size-4" />, labelKey: 'clearContext.tooltip' },
   clearChat: { icon: <Trash2 className="size-4" />, labelKey: 'clearChat' },
 }
@@ -61,7 +59,7 @@ const TOOL_CONFIG_MAP: Record<string, { icon: React.ReactNode; labelKey: string 
 // 工具栏分组定义
 const TOOLBAR_GROUPS = {
   bottom: ['modelSelect', 'promptSelect', 'chatLanguage'],
-  topLeft: ['chatLink', 'fileLink', 'mcpButton', 'ragSwitch', 'chatPlaceholder', 'clipboardMonitor'],
+  topLeft: ['chatLink', 'fileLink', 'mcpButton', 'ragSwitch', 'chatPlaceholder'],
   topRight: ['clearContext', 'clearChat'],
 }
 

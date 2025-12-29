@@ -6,7 +6,6 @@ import { remove } from "@tauri-apps/plugin-fs";
 import { toast } from "@/hooks/use-toast";
 import { cloneDeep } from "lodash-es";
 import { ask } from '@tauri-apps/plugin-dialog';
-import useSettingStore from '@/stores/setting';
 
 interface DeleteFolderProps {
   item: DirTree;
@@ -20,7 +19,6 @@ export function DeleteFolder({ item }: DeleteFolderProps) {
     fileTree,
     setFileTree
   } = useArticleStore();
-  const { primaryBackupMethod } = useSettingStore();
 
   const path = computedParentPath(item);
 
@@ -72,18 +70,6 @@ export function DeleteFolder({ item }: DeleteFolderProps) {
       }
 
       setFileTree(cacheTree);
-
-      // 如果启用了同步，同步删除操作
-      if (primaryBackupMethod === 'github') {
-        const { deleteFile: deleteGithubFile } = await import('@/lib/sync/github');
-        await deleteGithubFile({ path, sha: item.sha || '', repo: 'sync' as any });
-      } else if (primaryBackupMethod === 'gitee') {
-        const { deleteFile: deleteGiteeFile } = await import('@/lib/sync/gitee');
-        await deleteGiteeFile({ path, sha: item.sha || '', repo: 'sync' as any });
-      } else if (primaryBackupMethod === 'gitlab') {
-        const { deleteFile: deleteGitlabFile } = await import('@/lib/sync/gitlab');
-        await deleteGitlabFile({ path, sha: item.sha, repo: 'sync' as any });
-      }
 
       toast({ title: t('context.deleteSuccess') });
     } catch (error) {

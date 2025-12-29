@@ -1,8 +1,6 @@
-mod webdav;
 mod mcp;
 mod device;
 
-use webdav::{webdav_backup, webdav_create_dir, webdav_sync, webdav_test};
 use mcp::{start_mcp_stdio_server, stop_mcp_server, send_mcp_message, McpServerManager};
 use device::get_device_id;
 
@@ -18,10 +16,6 @@ pub fn run() {
         .plugin(tauri_plugin_sql::Builder::default().build())
         .manage(McpServerManager::new())
         .invoke_handler(tauri::generate_handler![
-            webdav_test,
-            webdav_backup,
-            webdav_sync,
-            webdav_create_dir,
             start_mcp_stdio_server,
             stop_mcp_server,
             send_mcp_message,

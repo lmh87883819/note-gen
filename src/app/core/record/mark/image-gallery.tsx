@@ -34,9 +34,7 @@ function ImageItem({ mark }: { mark: Mark }) {
   const { fetchMarks } = useMarkStore()
   const { tags, currentTagId, fetchTags, getCurrentTag } = useTagStore()
   const [photoSrc, setPhotoSrc] = useState('')
-  const imagePath = mark.type === 'scan' 
-    ? `/screenshot/${mark.url}`
-    : `/image/${mark.url}`
+  const imagePath = `/image/${mark.url}`
 
   useEffect(() => {
     async function loadImage() {
@@ -76,19 +74,17 @@ function ImageItem({ mark }: { mark: Mark }) {
   async function handelShowInFolder(e?: React.MouseEvent) {
     e?.stopPropagation()
     const appDir = await appDataDir()
-    const path = mark.type === 'scan' ? 'screenshot' : 'image'
-    open(`${appDir}/${path}`)
+    open(`${appDir}/image`)
   }
 
   async function handelShowInFile(e?: React.MouseEvent) {
     e?.stopPropagation()
     const appDir = await appDataDir()
-    const path = mark.type === 'scan' ? 'screenshot' : 'image'
     let filename = mark.url
     if (mark.url.includes('http')) {
       filename = mark.url.split('/').pop() || '';
     }
-    open(`${appDir}/${path}/${filename}`)
+    open(`${appDir}/image/${filename}`)
   }
 
   async function handleCopyLink(e?: React.MouseEvent) {
@@ -142,9 +138,6 @@ function ImageItem({ mark }: { mark: Mark }) {
             ))}
           </ContextMenuSubContent>
         </ContextMenuSub>
-        <ContextMenuItem inset disabled={true}>
-          {t('record.mark.toolbar.convertTo', { type: mark.type === 'scan' ? t('record.mark.type.image') : t('record.mark.type.screenshot') })}
-        </ContextMenuItem>
         <ContextMenuItem inset disabled={!mark.url} onClick={handleCopyLink}>
           {t('record.mark.toolbar.copyLink')}
         </ContextMenuItem>
@@ -172,10 +165,9 @@ export function ImageGallery({ marks }: ImageGalleryProps) {
   const t = useTranslations()
   const [isExpanded, setIsExpanded] = useState(false)
 
-  // 筛选出没有内容的图片记录（包括 scan 和 image 类型）
+  // 筛选出没有内容的图片记录
   const emptyImageMarks = marks.filter(mark => 
-    (mark.type === 'image' || mark.type === 'scan') && 
-    (!mark.content || mark.content.trim() === '')
+    mark.type === 'image' && (!mark.content || mark.content.trim() === '')
   )
 
   // 如果没有无内容的图片，不显示组件

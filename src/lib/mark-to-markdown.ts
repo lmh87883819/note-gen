@@ -14,11 +14,6 @@ export function markToMarkdown(mark: Mark): string {
       const imageDesc = mark.desc || 'image';
       return `![${imageDesc}](${mark.url})`;
     
-    case 'scan':
-      // Screenshot: similar to image
-      const scanDesc = mark.desc || 'screenshot';
-      return `![${scanDesc}](${mark.url})`;
-    
     case 'link':
       // Link: insert as markdown link with description
       const linkDesc = mark.desc || mark.url;
@@ -28,12 +23,6 @@ export function markToMarkdown(mark: Mark): string {
       // File: insert as markdown link with filename
       const fileName = mark.desc || 'file';
       return `[${fileName}](${mark.url})`;
-    
-    case 'recording':
-      // Recording: insert content (transcription) with audio link
-      const recordingContent = mark.content || '';
-      const audioLink = mark.url ? `\n\n[🎵 Audio Recording](${mark.url})` : '';
-      return recordingContent + audioLink;
     
     default:
       return mark.content || '';

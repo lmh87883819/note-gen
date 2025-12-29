@@ -2,11 +2,9 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
 import { Input } from "@/components/ui/input";
 import useArticleStore, { DirTree } from "@/stores/article";
 import { BaseDirectory, exists, readTextFile, remove, rename, writeTextFile } from "@tauri-apps/plugin-fs";
-import { Cloud, CloudDownload, File, ImageIcon } from "lucide-react"
+import { File, ImageIcon } from "lucide-react"
 import { useEffect, useRef, useState, useCallback } from "react";
 import { ask } from '@tauri-apps/plugin-dialog';
-import { Store } from '@tauri-apps/plugin-store';
-import { RepoNames } from "@/lib/sync/github.types";
 import { cloneDeep } from "lodash-es";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { computedParentPath, getCurrentFolder } from "@/lib/path";
@@ -16,9 +14,6 @@ import useClipboardStore from "@/stores/clipboard";
 import { PhotoProvider, PhotoView } from "react-photo-view";
 import { convertImageByWorkspace } from "@/lib/utils";
 import { appDataDir, join } from '@tauri-apps/api/path';
-import { deleteFile } from "@/lib/sync/github";
-import { deleteFile as deleteGiteeFile } from "@/lib/sync/gitee";
-import { deleteFile as deleteGitlabFile } from "@/lib/sync/gitlab";
 import { generateUniqueFilename } from "@/lib/default-filename";
 import { MobileActionMenu, MobileMenuItem, MobileSeparator } from "./mobile-action-menu";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -113,7 +108,7 @@ export function FileItem({ item }: { item: DirTree }) {
         setCurrentArticle('')
       } else {
         setActiveFilePath(currentPath)
-        readArticle(currentPath, item.sha, item.isLocale)
+        readArticle(currentPath)
       }
     }
   }
@@ -174,47 +169,6 @@ export function FileItem({ item }: { item: DirTree }) {
           description: '删除文件失败: ' + error,
           variant: 'destructive'
         })
-      }
-    }
-  }
-
-  async function handleDeleteSyncFile() {
-    const answer = await ask(t('context.deleteSyncFile') + '?', {
-      title: item.name,
-      kind: 'warning',
-    });
-    if (answer) {
-      try {
-        // 获取当前主要备份方式
-        const store = await Store.load('store.json');
-        const backupMethod = await store.get<'github' | 'gitee' | 'gitlab'>('primaryBackupMethod') || 'github';
-        
-        switch (backupMethod) {
-          case 'github':
-            await deleteFile({ path: activeFilePath, sha: item.sha as string, repo: RepoNames.sync });
-            break;
-          case 'gitee':
-            await deleteGiteeFile({ path: activeFilePath, sha: item.sha as string, repo: RepoNames.sync });
-            break;
-          case 'gitlab':
-            await deleteGitlabFile({ path: activeFilePath, sha: item.sha as string, repo: RepoNames.sync });
-            break;
-        }
-        
-        // 更新文件树
-        await loadFileTree()
-
-        toast({
-          title: t('context.delete'),
-          description: t('context.deleteSyncFileSuccess'),
-        });
-      } catch (error) {
-        console.error(error);
-        toast({
-          title: t('context.delete'),
-          description: t('context.deleteSyncFileError'),
-          variant: 'destructive',
-        });
       }
     }
   }
@@ -323,7 +277,7 @@ export function FileItem({ item }: { item: DirTree }) {
       }
       setActiveFilePath(newPath)
       // 新建文件后自动选择该文件并读取内容
-      readArticle(newPath, '', true)
+      readArticle(newPath)
     } else {
       // 处理取消创建或无变更的情况
       if (item.name === '') {
@@ -520,7 +474,6 @@ export function FileItem({ item }: { item: DirTree }) {
                       <span className={item.parent ? 'size-0' : 'size-4 ml-1'}></span>
                       <div className="relative">
                         <ImageIcon className="size-4" />
-                        { item.sha && item.isLocale && <Cloud className="size-2.5 absolute left-0 bottom-0 z-10 bg-primary-foreground" /> }
                       </div>
                       <span className="text-xs flex-1 line-clamp-1">{item.name}</span>
                     </div>
@@ -543,9 +496,6 @@ export function FileItem({ item }: { item: DirTree }) {
                         <MobileMenuItem disabled={!item.isLocale} onClick={handleStartRename}>
                           {t('context.rename')}
                         </MobileMenuItem>
-                        <MobileMenuItem disabled={!item.sha} className="text-red-600" onClick={handleDeleteSyncFile}>
-                          {t('context.deleteSyncFile')}
-                        </MobileMenuItem>
                         <MobileMenuItem disabled={!item.isLocale || item.name === ''} className="text-red-600" onClick={handleDeleteFile}>
                           {t('context.deleteLocalFile')}
                         </MobileMenuItem>
@@ -562,8 +512,7 @@ export function FileItem({ item }: { item: DirTree }) {
                 <div className="flex flex-1 gap-1 select-none relative">
                   <span className={item.parent ? 'size-0' : 'size-4 ml-1'}></span>
                   <div className="relative">
-                    { item.isLocale ? <File className="size-4" /> : <CloudDownload className="size-4" /> }
-                    { item.sha && item.isLocale && <Cloud className="size-2.5 absolute left-0 bottom-0 z-10 bg-primary-foreground" /> }
+                    <File className="size-4" />
                   </div>
                   <span className="text-xs flex-1 line-clamp-1">{item.name}</span>
                 </div>
@@ -585,9 +534,6 @@ export function FileItem({ item }: { item: DirTree }) {
                     <MobileSeparator />
                     <MobileMenuItem disabled={!item.isLocale} onClick={handleStartRename}>
                       {t('context.rename')}
-                    </MobileMenuItem>
-                    <MobileMenuItem disabled={!item.sha} className="text-red-600" onClick={handleDeleteSyncFile}>
-                      {t('context.deleteSyncFile')}
                     </MobileMenuItem>
                     <MobileMenuItem disabled={!item.isLocale || item.name === ''} className="text-red-600" onClick={handleDeleteFile}>
                       {t('context.deleteLocalFile')}
@@ -615,9 +561,6 @@ export function FileItem({ item }: { item: DirTree }) {
           <ContextMenuSeparator />
           <ContextMenuItem disabled={!item.isLocale} inset onClick={handleStartRename}>
             {t('context.rename')}
-          </ContextMenuItem>
-          <ContextMenuItem disabled={!item.sha} inset className="text-red-900" onClick={handleDeleteSyncFile}>
-            {t('context.deleteSyncFile')}
           </ContextMenuItem>
           <ContextMenuItem disabled={!item.isLocale || item.name === ''} inset className="text-red-900" onClick={handleDeleteFile}>
             {t('context.deleteLocalFile')}

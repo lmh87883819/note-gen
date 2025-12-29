@@ -42,7 +42,7 @@ export function SettingDev({id, icon}: {id: string, icon?: React.ReactNode}) {
       kind: 'warning',
     })
     if (res) {
-      const folders = ['screenshot', 'article', 'clipboard', 'image']
+      const folders = ['article', 'clipboard', 'image']
       for (const folder of folders) {
         const isFolderExists = await exists(folder, { baseDir: BaseDirectory.AppData})
         if (isFolderExists) {

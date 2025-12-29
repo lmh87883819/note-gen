@@ -20,7 +20,6 @@ import { ChatLink } from "./chat-link"
 import { McpButton } from "./mcp-button"
 import { RagSwitch } from "./rag-switch"
 import ChatPlaceholder from "./chat-placeholder"
-import { ClipboardMonitor } from "./clipboard-monitor"
 import { ClearContext } from "./clear-context"
 import { ClearChat } from "./clear-chat"
 import { ChatModeSelect } from "./chat-mode-select"
@@ -134,7 +133,6 @@ export function ChatInput() {
       setPlaceholder(t('record.chat.input.placeholder.default'))
       return
     }
-    const scanMarks = isLinkMark ? marks.filter(item => item.type === 'scan') : []
     const textMarks = isLinkMark ? marks.filter(item => item.type === 'text') : []
     const imageMarks = isLinkMark ? marks.filter(item => item.type === 'image') : []
     const fileMarks = isLinkMark ? marks.filter(item => item.type === 'file') : []
@@ -142,7 +140,7 @@ export function ChatInput() {
     const lastClearIndex = chats.findLastIndex(item => item.type === 'clear')
     const chatsAfterClear = chats.slice(lastClearIndex + 1)
     const request_content = `
-      ${[...scanMarks, ...textMarks, ...imageMarks, ...fileMarks, ...linkMarks]
+      ${[...textMarks, ...imageMarks, ...fileMarks, ...linkMarks]
         .slice(0, 5)
         .map(item => item.content?.replace(/<thinking>[\s\S]*?<thinking>/g, '').slice(0, 60))
         .join(';\n\n')}
@@ -359,8 +357,6 @@ export function ChatInput() {
                         return <RagSwitch key={item.id} />
                       case 'chatPlaceholder':
                         return <ChatPlaceholder key={item.id} />
-                      case 'clipboardMonitor':
-                        return <ClipboardMonitor key={item.id} />
                       case 'clearContext':
                         return <ClearContext key={item.id} />
                       case 'clearChat':

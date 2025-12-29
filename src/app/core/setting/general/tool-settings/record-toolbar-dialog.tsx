@@ -7,8 +7,6 @@ import useSettingStore, { RecordToolbarItem } from '@/stores/setting'
 import { useEffect, useState } from 'react'
 import { 
   CopySlash,
-  Mic,
-  ScanLine,
   ImagePlus,
   Link2,
   FileText,
@@ -40,8 +38,6 @@ interface RecordToolbarDialogProps {
 // 工具配置映射
 const TOOL_CONFIG_MAP: Record<string, { icon: React.ReactNode; labelKey: string }> = {
   text: { icon: <CopySlash className="size-4" />, labelKey: 'text' },
-  recording: { icon: <Mic className="size-4" />, labelKey: 'recording' },
-  scan: { icon: <ScanLine className="size-4" />, labelKey: 'scan' },
   image: { icon: <ImagePlus className="size-4" />, labelKey: 'image' },
   link: { icon: <Link2 className="size-4" />, labelKey: 'link' },
   file: { icon: <FileText className="size-4" />, labelKey: 'file' },
@@ -56,7 +52,12 @@ export function RecordToolbarDialog({ open, onOpenChange }: RecordToolbarDialogP
   useEffect(() => {
     if (open) {
       // 打开抽屉时，加载当前配置
-      setLocalConfig([...recordToolbarConfig].sort((a, b) => a.order - b.order))
+      const allowedIds = new Set(['text', 'image', 'link', 'file'])
+      setLocalConfig(
+        recordToolbarConfig
+          .filter(item => allowedIds.has(item.id))
+          .sort((a, b) => a.order - b.order)
+      )
     }
   }, [open, recordToolbarConfig])
 

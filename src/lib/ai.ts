@@ -61,7 +61,6 @@ async function getAISettings(modelType?: string): Promise<AiConfig | undefined> 
           modelType: targetModel.modelType,
           temperature: targetModel.temperature,
           topP: targetModel.topP,
-          voice: targetModel.voice,
           enableStream: targetModel.enableStream
         }
       }
@@ -153,7 +152,6 @@ async function getEmbeddingModelInfo() {
           modelType: targetModel.modelType,
           temperature: targetModel.temperature,
           topP: targetModel.topP,
-          voice: targetModel.voice,
           enableStream: targetModel.enableStream
         };
       }
@@ -194,7 +192,6 @@ export async function getRerankModelInfo() {
           modelType: targetModel.modelType,
           temperature: targetModel.temperature,
           topP: targetModel.topP,
-          voice: targetModel.voice,
           enableStream: targetModel.enableStream
         };
       }
@@ -855,74 +852,12 @@ export async function fetchAiDesc(text: string) {
     // 获取AI设置
     const aiConfig = await getAISettings('markDescModel')
     
-    const descContent = `Based on the screenshot content: ${text}, return a description. Keep it under 50 characters and avoid special characters.`
+    const descContent = `Based on the content: ${text}, return a description. Keep it under 50 characters and avoid special characters.`
     
     // 准备消息（包含语言设置）
     const { messages } = await prepareMessages(descContent, true)
     
     const openai = await createOpenAIClient(aiConfig)
-    const completion = await openai.chat.completions.create({
-      model: aiConfig?.model || '',
-      messages: messages,
-      temperature: aiConfig?.temperature || 1,
-      top_p: aiConfig?.topP || 1,
-    })
-    
-    return completion.choices[0].message.content || ''
-  } catch (error) {
-    handleAIError(error, false)
-    return null
-  }
-}
-
-export async function fetchAiDescByImage(base64: string) {
-  try {
-    // 获取AI设置
-    const aiConfig = await getAISettings('imageMethodModel')
-
-    const descContent = `Based on the screenshot content, return a description.`
-    
-    // 获取语言设置
-    const store = await Store.load('store.json')
-    const chatLanguage = await store.get<string>('chatLanguage') || 'English'
-    const languageInstruction = `IMPORTANT: You MUST respond in ${chatLanguage} language. Do NOT use any other language under any circumstances.`
-    
-    // 获取prompt内容
-    let promptContent = await getPromptContent()
-    if (promptContent) {
-      promptContent += '\n\n' + languageInstruction
-    } else {
-      promptContent = languageInstruction
-    }
-    
-    const openai = await createOpenAIClient(aiConfig)
-    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = []
-    
-    // 如果有系统提示，先添加
-    if (promptContent) {
-      messages.push({
-        role: 'system',
-        content: promptContent
-      })
-    }
-    
-    // 添加用户消息（包含图片）
-    messages.push({
-      role: 'user' as const,
-      content: [
-        {
-          type: 'image_url',
-          image_url: {
-            url: base64
-          }
-        },
-        {
-          type: 'text',
-          text: descContent
-        }
-      ]
-    })
-    
     const completion = await openai.chat.completions.create({
       model: aiConfig?.model || '',
       messages: messages,

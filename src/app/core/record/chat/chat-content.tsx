@@ -1,6 +1,6 @@
 import useChatStore from '@/stores/chat'
 import useTagStore from '@/stores/tag'
-import { ArrowDownToLine, BotMessageSquare, ClipboardCheck, LoaderPinwheel, Undo2, UserRound, X } from 'lucide-react'
+import { ArrowDownToLine, BotMessageSquare, LoaderPinwheel, Undo2, UserRound, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Chat } from '@/db/chats'
 import ChatPreview from './chat-preview'
@@ -11,8 +11,6 @@ import { ChatClipboard } from './chat-clipboard'
 import MessageControl from './message-control'
 import ChatEmpty from './chat-empty'
 import { useTranslations } from 'next-intl'
-import useSyncStore from '@/stores/sync'
-import { Avatar, AvatarImage } from '@/components/ui/avatar'
 import ChatThinking from './chat-thinking'
 import { Separator } from '@/components/ui/separator'
 import { scrollToBottom } from '@/lib/utils'
@@ -80,7 +78,6 @@ export default function ChatContent() {
 
 function MessageWrapper({ chat, children }: { chat: Chat, children: React.ReactNode }) {
   const { chats, loading } = useChatStore()
-  const { userInfo } = useSyncStore()
 
   const revertChat = () => {
     emitter.emit('revertChat', chat.content)
@@ -91,21 +88,17 @@ function MessageWrapper({ chat, children }: { chat: Chat, children: React.ReactN
     {
       chat.role === 'user' ?  
       <div className="relative">
-        <Avatar className='rounded size-6 items-center justify-center hidden md:flex'>
-          {
-            userInfo?.avatar_url ?
-            <AvatarImage src={userInfo?.avatar_url} /> : <UserRound />
-          }
-        </Avatar>
+        <div className="rounded size-6 items-center justify-center hidden md:flex">
+          <UserRound />
+        </div>
         <Button onClick={revertChat} size="icon" className="absolute top-0 right-0 hidden group-hover:flex">
           <Undo2 />
         </Button>
       </div> :
       <div className='hidden md:flex'>
-        {loading && index === chats.length - 1 && chat.type === 'chat' ?
-          <LoaderPinwheel className="animate-spin" /> :
-          chat.type === 'clipboard' ? <ClipboardCheck /> : <BotMessageSquare />
-        }
+        {loading && index === chats.length - 1 && chat.type === 'chat'
+          ? <LoaderPinwheel className="animate-spin" />
+          : <BotMessageSquare />}
       </div>
     }
     <div className='text-sm leading-6 flex-1 break-words'>

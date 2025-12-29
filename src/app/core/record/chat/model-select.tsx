@@ -78,14 +78,13 @@ export function ModelSelect() {
               model: {
                 id: config.key,
                 model: config.model,
-                modelType: config.modelType || 'chat',
-                temperature: config.temperature,
-                topP: config.topP,
-                voice: config.voice,
-                enableStream: config.enableStream
-              }
-            })
-          }
+              modelType: config.modelType || 'chat',
+              temperature: config.temperature,
+              topP: config.topP,
+              enableStream: config.enableStream
+            }
+          })
+        }
         }
       })
       

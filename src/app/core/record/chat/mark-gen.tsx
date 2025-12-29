@@ -1,6 +1,6 @@
 "use client"
 import { Send, Square } from "lucide-react"
-import useSettingStore, { GenTemplate, GenTemplateRange } from "@/stores/setting"
+import useSettingStore from "@/stores/setting"
 import useChatStore from "@/stores/chat"
 import useTagStore from "@/stores/tag"
 import useMarkStore from "@/stores/mark"
@@ -16,18 +16,10 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 
-import {
-  Tabs,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs"
 import { useState, useImperativeHandle, forwardRef, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
-import { Store } from "@tauri-apps/plugin-store"
 import { Label } from "@/components/ui/label"
-import { useRouter } from "next/navigation";
 import dayjs, { Dayjs } from "dayjs"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useTranslations } from "next-intl"
 
@@ -41,18 +33,9 @@ export const MarkGen = forwardRef<{ openGen: () => void }, MarkGenProps>(({ inpu
   const { currentTagId } = useTagStore()
   const { insert, loading, setLoading, saveChat, locale } = useChatStore()
   const { fetchMarks, marks } = useMarkStore()
-  const [tab, setTab] = useState('0')
-  const [genTemplate, setGenTemplate] = useState<GenTemplate[]>([])
-  const router = useRouter()
   const abortControllerRef = useRef<AbortController | null>(null)
   const [isRemoveThinking, setIsRemoveThinking] = useState(true)
   const t = useTranslations('record.chat.note')
-
-  async function initGenTemplates() {
-    const store = await Store.load('store.json')
-    const template = await store.get<GenTemplate[]>('templateList') || []
-    setGenTemplate(template)
-  }
 
   useImperativeHandle(ref, () => ({
     openGen
@@ -89,7 +72,6 @@ export const MarkGen = forwardRef<{ openGen: () => void }, MarkGenProps>(({ inpu
 
   function openGen() {
     setOpen(true)
-    initGenTemplates()
   }
 
   async function handleGen() {
@@ -106,33 +88,8 @@ export const MarkGen = forwardRef<{ openGen: () => void }, MarkGenProps>(({ inpu
     })
     if (!message) return
     await fetchMarks()
-    const range = genTemplate.find(item => item.id === tab)?.range
-    let subtractDate: Dayjs
-    switch (range) {
-      case GenTemplateRange.All:
-        subtractDate = dayjs().subtract(99, 'year')
-        break
-      case GenTemplateRange.Today:
-        subtractDate = dayjs().subtract(1, 'day')
-        break
-      case GenTemplateRange.Week:
-        subtractDate = dayjs().subtract(1, 'week')
-        break
-      case GenTemplateRange.Month:
-        subtractDate = dayjs().subtract(1, 'month')
-        break
-      case GenTemplateRange.ThreeMonth:
-        subtractDate = dayjs().subtract(3, 'month')
-        break
-      case GenTemplateRange.Year:
-        subtractDate = dayjs().subtract(1, 'year')
-        break
-      default:
-        subtractDate = dayjs().subtract(99, 'year')
-        break
-    };
+    const subtractDate: Dayjs = dayjs().subtract(99, 'year')
     const marksByRange = marks.filter(item => dayjs(item.createdAt).isAfter(subtractDate))
-    const scanMarks = marksByRange.filter(item => item.type === 'scan')
     const textMarks = marksByRange.filter(item => item.type === 'text').map(item => {
       if (!item.content) return item
       if (isRemoveThinking) {
@@ -149,8 +106,6 @@ export const MarkGen = forwardRef<{ openGen: () => void }, MarkGenProps>(({ inpu
       }
     }
     const request_content = `
-      以下是通过截图后，使用OCR识别出的文字片段：
-      ${scanMarks.map((item, index) => `第 ${index + 1} 条记录内容：${item.content}。创建于 ${dayjs(item.createdAt).format('YYYY-MM-DD HH:mm:ss')}`).join(';\n\n')}。
       以下是通过文本复制记录的片段：
       ${textMarks.map((item, index) => `第 ${index + 1} 条记录内容：${item.content}。创建于 ${dayjs(item.createdAt).format('YYYY-MM-DD HH:mm:ss')}`).join(';\n\n')}。
       以下是插图记录的片段描述：
@@ -186,7 +141,6 @@ export const MarkGen = forwardRef<{ openGen: () => void }, MarkGenProps>(({ inpu
         '- 如果存在插图记录，通过插图记录的描述，将图片链接放在笔记中的适合位置，图片地址包含 uuid，请完整返回，并对插图附带简单的描述。'
         : ''
       }
-      ${genTemplate.find(item => item.id === tab)?.content}
     `
     // 先保存空消息，然后通过流式请求更新
     await saveChat({
@@ -225,10 +179,6 @@ export const MarkGen = forwardRef<{ openGen: () => void }, MarkGenProps>(({ inpu
     }
   }
 
-  function handleSetting() {
-    router.push('/core/setting/template');
-  }
-
   const handleStop = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort()
@@ -255,35 +205,14 @@ export const MarkGen = forwardRef<{ openGen: () => void }, MarkGenProps>(({ inpu
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{t('organizeAs')}</AlertDialogTitle> 
-          <Tabs defaultValue={tab} onValueChange={value => setTab(value)}>
-            <TabsList>
-              {
-                genTemplate.map(item => (
-                  <TabsTrigger value={item.id} key={item.id}>{item.title}</TabsTrigger>
-                ))
-              }
-            </TabsList>
-          </Tabs>
         </AlertDialogHeader>
         <div className="flex flex-col gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center justify-between mb-2">
-              <Label htmlFor="name">{t('templateContent')}</Label>
-              <Label>{t('recordRange')}: { genTemplate.find(item => item.id === tab)?.range }</Label>
-            </div>
-            <ScrollArea className="h-32 w-full p-2 rounded-md border">
-              <p className="text-xs text-muted-foreground whitespace-pre-wrap">
-                { genTemplate.find(item => item.id === tab)?.content }
-              </p>
-            </ScrollArea>
-          </div>
           <div className="flex items-center gap-2">
             <Checkbox id="remove-thinking" checked={isRemoveThinking} onCheckedChange={(checked) => setIsRemoveThinking(checked === true)} />
             <Label htmlFor="remove-thinking">{t('filterThinkingContent')}</Label>
           </div>
         </div>
         <AlertDialogFooter>
-          <Button variant={"ghost"} disabled={loading} onClick={handleSetting}>{t('manageTemplate')}</Button>
           <Button variant={"outline"} onClick={() => setOpen(false)}>{t('cancel')}</Button>
           <Button onClick={handleGen}>{t('startOrganize')}</Button>
         </AlertDialogFooter>

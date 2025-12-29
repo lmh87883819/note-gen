@@ -8,17 +8,12 @@ import { Search, Settings, Minus, Square, X, PanelLeft, PanelLeftClose, PanelRig
 import { usePathname, useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { useSidebarStore } from '@/stores/sidebar'
-import { PinToggle } from './pin-toggle'
-import { SyncToggle } from './title-bar-toolbars/sync-toggle'
-import AppStatus from './app-status'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Button } from '@/components/ui/button'
 import useSettingStore from '@/stores/setting'
 import useArticleStore from '@/stores/article'
 import React from 'react'
 import { ControlText } from '@/app/core/record/mark/control-text'
-import { ControlRecording } from '@/app/core/record/mark/control-recording'
-import { ControlScan } from '@/app/core/record/mark/control-scan'
 import { ControlImage } from '@/app/core/record/mark/control-image'
 import { ControlLink } from '@/app/core/record/mark/control-link'
 import { ControlFile } from '@/app/core/record/mark/control-file'
@@ -129,10 +124,6 @@ export function TitleBar({ onSearchClick }: TitleBarProps) {
                 switch (item.id) {
                   case 'text':
                     return <ControlText key={item.id} />
-                  case 'recording':
-                    return <ControlRecording key={item.id} />
-                  case 'scan':
-                    return <ControlScan key={item.id} />
                   case 'image':
                     return <ControlImage key={item.id} />
                   case 'link':
@@ -196,10 +187,6 @@ export function TitleBar({ onSearchClick }: TitleBarProps) {
             </TooltipContent>
           </Tooltip>
           
-          <SyncToggle />
-          
-          <PinToggle />
-          
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -225,8 +212,6 @@ export function TitleBar({ onSearchClick }: TitleBarProps) {
               <p>{pathname.includes('/core/setting') ? t('common.back') : t('common.settings')}</p>
             </TooltipContent>
           </Tooltip>
-          
-          <AppStatus inTitlebar />
         </div>
 
         {/* Windows 控制按钮 */}

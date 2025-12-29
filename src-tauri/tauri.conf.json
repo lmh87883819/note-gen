@@ -32,7 +32,7 @@
   },
   "bundle": {
     "active": true,
-    "createUpdaterArtifacts": true,
+    "createUpdaterArtifacts": false,
     "targets": "all",
     "resources": [
       "icons"
@@ -46,17 +46,6 @@
     ],
     "iOS": {
       "bundleVersion": "0.23.1"
-    }
-  },
-  "plugins": {
-    "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRENURGRUVFREY4M0RGRDkKUldUWjM0UGY3djVkVGQ0aDluR0J6SnBUV2dET0FibXdzVmdTL2hIM21QQ1NCS3R2enllUStSd2oK",
-      "endpoints": [
-        "http://api.upgrade.toolsetlink.com/v1/tauri/upgrade?tauriKey=tyEi-iLVFxnRhGc9c_xApw&versionName={{current_version}}&appointVersionName=&devModelKey=&devKey=&target={{target}}&arch={{arch}}",
-        "https://github.com/codexu/note-gen/releases/latest/download/latest.json"
-      ],
-      "createUpdaterArtifacts": true,
-      "dangerousInsecureTransportProtocol": true
     }
   }
 }

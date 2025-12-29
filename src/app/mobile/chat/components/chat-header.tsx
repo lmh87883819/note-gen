@@ -71,7 +71,6 @@ export function ChatHeader() {
               modelType: config.modelType || 'chat',
               temperature: config.temperature,
               topP: config.topP,
-              voice: config.voice,
               enableStream: config.enableStream
             }
           })

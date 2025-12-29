@@ -1,6 +1,5 @@
 'use client'
 import { SettingTab } from "./components/setting-tab"
-import Updater from "@/app/core/setting/about/updater"
 
 export default function Setting() {
   return <div id="mobile-setting" className="flex w-full h-full overflow-y-auto flex-col">
@@ -9,9 +8,6 @@ export default function Setting() {
       </div>
     </div>
     <div className="flex-1 overflow-y-auto">
-      <div className="p-2 my-4">
-        <Updater />
-      </div>
       <SettingTab />
     </div>
   </div>

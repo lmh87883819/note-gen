@@ -47,7 +47,7 @@ export const createMarkTool: Tool = {
     {
       name: 'type',
       type: 'string',
-      description: '记录类型：scan, text, image, link, file, recording',
+      description: '记录类型：text, image, link, file',
       required: true,
     },
     {
@@ -73,7 +73,7 @@ export const createMarkTool: Tool = {
     try {
       const mark: Partial<Mark> = {
         tagId: params.tagId,
-        type: params.type as 'scan' | 'text' | 'image' | 'link' | 'file' | 'recording',
+        type: params.type as 'text' | 'image' | 'link' | 'file',
         content: params.content,
         url: params.url || '',
         desc: params.desc,
@@ -236,7 +236,7 @@ export const searchMarksTool: Tool = {
     {
       name: 'type',
       type: 'string',
-      description: '可选：按类型筛选（scan, text, image, link, file, recording）',
+      description: '可选：按类型筛选（text, image, link, file）',
       required: false,
     },
   ],

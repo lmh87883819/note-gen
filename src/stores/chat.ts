@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { Chat, clearChatsByTagId, deleteChat, getChats, initChatsDb, insertChat, updateChat, updateChatsInsertedById } from '@/db/chats'
+import { Chat, DEFAULT_CHAT_TAG_ID, clearChatsByTagId, deleteChat, getChats, initChatsDb, insertChat, updateChat, updateChatsInsertedById } from '@/db/chats'
 import { Store } from '@tauri-apps/plugin-store';
 import { locales } from '@/lib/locales';
 import { ChatMode, AgentState, ToolCall } from '@/lib/agent/types';
@@ -21,15 +21,12 @@ interface ChatState {
   loading: boolean
   setLoading: (loading: boolean) => void
 
-  isLinkMark: boolean // 是否关联记录
-  setIsLinkMark: (isLinkMark: boolean) => void
-
   isPlaceholderEnabled: boolean // 是否启用AI提示占位符
   setPlaceholderEnabled: (isEnabled: boolean) => void
 
   chats: Chat[]
-  init: (tagId: number) => Promise<void> // 初始化 chats
-  insert: (chat: Omit<Chat, 'id' | 'createdAt'>) => Promise<Chat | null> // 插入一条 chat
+  init: () => Promise<void> // 初始化 chats
+  insert: (chat: Omit<Chat, 'id' | 'createdAt' | 'tagId'> & { tagId?: number }) => Promise<Chat | null> // 插入一条 chat
   updateChat: (chat: Chat) => void // 更新一条 chat
   saveChat: (chat: Chat, isSave?: boolean) => Promise<void> // 保存一条 chat，用于动态 AI 回复结束后保存数据库
   deleteChat: (id: number) => Promise<void> // 删除一条 chat
@@ -38,7 +35,7 @@ interface ChatState {
   getLocale: () => Promise<void>
   setLocale: (locale: string) => void
 
-  clearChats: (tagId: number) => Promise<void> // 清空 chats
+  clearChats: () => Promise<void> // 清空 chats
   updateInsert: (id: number) => Promise<void> // 更新 inserted
   
   // MCP 工具调用记录（临时缓存）
@@ -64,11 +61,6 @@ const useChatStore = create<ChatState>((set, get) => ({
 
   setLoading: (loading: boolean) => {
     set({ loading })
-  },
-
-  isLinkMark: true,
-  setIsLinkMark: (isLinkMark: boolean) => {
-    set({ isLinkMark })
   },
 
   isPlaceholderEnabled: true,
@@ -141,19 +133,21 @@ const useChatStore = create<ChatState>((set, get) => ({
   },
 
   chats: [],
-  init: async (tagId: number) => {
+  init: async () => {
     await initChatsDb()
-    const data = await getChats(tagId)
+    const data = await getChats()
     set({ chats: data })
   },
   insert: async (chat) => {
-    const res = await insertChat(chat)
+    const tagId = chat.tagId ?? DEFAULT_CHAT_TAG_ID
+    const res = await insertChat({ ...chat, tagId })
     let data: Chat
     if (res.lastInsertId) {
       data =  {
         id: res.lastInsertId,
         createdAt: Date.now(),
-        ...chat
+        ...chat,
+        tagId
       }
       const chats = get().chats
       const newChats = [...chats, data]
@@ -198,9 +192,9 @@ const useChatStore = create<ChatState>((set, get) => ({
     await store.set('note_locale', locale)
   },
 
-  clearChats: async (tagId) => {
+  clearChats: async () => {
     set({ chats: [] })
-    await clearChatsByTagId(tagId)
+    await clearChatsByTagId()
   },
 
   updateInsert: async (id) => {

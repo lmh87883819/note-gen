@@ -8,17 +8,7 @@ export const createToolbarConfig = (t: any, editorWidth?: number) => {
     { name: 'redo', tipPosition: 's' },
   ]
 
-  const markTool = {
-    name: 'mark',
-    tipPosition: 's',
-    tip: t('toolbar.mark.tooltip'),
-    className: 'right',
-    icon: '<svg><use xlink:href="#vditor-icon-mark"></svg>',
-    click: () => emitter.emit('toolbar-mark'),
-  }
-
   const group2Mobile = [
-    markTool,
     {
       name: 'continue',
       tipPosition: 's',

@@ -1,13 +1,10 @@
 import useChatStore from '@/stores/chat'
-import useTagStore from '@/stores/tag'
 import { ArrowDownToLine, BotMessageSquare, LoaderPinwheel, Undo2, UserRound, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Chat } from '@/db/chats'
 import ChatPreview from './chat-preview'
 import './chat.scss'
 import { NoteOutput } from './message-control/note-output'
-import { MarkText } from './message-control/mark-text'
-import { ChatClipboard } from './chat-clipboard'
 import MessageControl from './message-control'
 import ChatEmpty from './chat-empty'
 import { useTranslations } from 'next-intl'
@@ -23,7 +20,6 @@ import { AgentHistory } from './agent-history'
 
 export default function ChatContent() {
   const { chats, init, agentState } = useChatStore()
-  const { currentTagId } = useTagStore()
   const [isOnBottom, setIsOnBottom] = useState(true)
 
   function handleScroll() {
@@ -42,8 +38,8 @@ export default function ChatContent() {
   }, [])
 
   useEffect(() => {
-    init(currentTagId)
-  }, [currentTagId])
+    init()
+  }, [init])
 
   // 监听消息变化，在底部时自动滚动
   useEffect(() => {
@@ -164,11 +160,6 @@ function Message({ chat }: { chat: Chat }) {
         <Separator className='flex-1' />
       </div>
 
-    case 'clipboard':
-      return <MessageWrapper chat={chat}>
-        <ChatClipboard chat={chat} />
-      </MessageWrapper>
-
     case 'note':
       return <MessageWrapper chat={chat}>
         {
@@ -209,7 +200,6 @@ function Message({ chat }: { chat: Chat }) {
           <ChatPreview text={content || ''} />
           {chat.role === 'system' && <RagSources sources={ragSources} />}
           <MessageControl chat={chat}>
-            {chat.role !== 'user' && <MarkText chat={chat} />}
           </MessageControl>
         </div>
       </MessageWrapper>

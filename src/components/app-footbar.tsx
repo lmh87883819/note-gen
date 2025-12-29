@@ -1,6 +1,6 @@
 'use client'
 
-import { MessageSquare, Highlighter, SquarePen, Settings } from "lucide-react"
+import { MessageSquare, SquarePen, Settings } from "lucide-react"
 import { usePathname, useRouter } from 'next/navigation'
 import { cn } from "@/lib/utils"
 import { Store } from "@tauri-apps/plugin-store"
@@ -20,11 +20,6 @@ export function AppFootbar() {
       title: t('navigation.chat'),
       url: "/mobile/chat",
       icon: MessageSquare,
-    },
-    {
-      title: t('navigation.record'),
-      url: "/mobile/record",
-      icon: Highlighter,
     },
     {
       title: t('navigation.write'),

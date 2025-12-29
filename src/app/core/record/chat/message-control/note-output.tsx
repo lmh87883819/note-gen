@@ -1,6 +1,5 @@
 'use client'
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -14,8 +13,6 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { extractTitle } from "@/lib/markdown"
 import { getFilePathOptions, getWorkspacePath, getGenericPathOptions } from "@/lib/workspace"
-import useTagStore from "@/stores/tag"
-import { CheckedState } from "@radix-ui/react-checkbox"
 import { BaseDirectory, readDir, writeTextFile } from "@tauri-apps/plugin-fs"
 import { Store } from "@tauri-apps/plugin-store"
 import { SquarePen, TriangleAlert } from "lucide-react"
@@ -27,13 +24,11 @@ import { useTranslations } from "next-intl"
 import useArticleStore from "@/stores/article"
 
 export function NoteOutput({chat}: {chat: Chat}) {
-  const { deleteTag, currentTagId } = useTagStore()
   const { loadFileTree } = useArticleStore()
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState('')
   const [path, setPath] = useState('/')
   const [folders, setFolders] = useState<string[]>([])
-  const [isRemove, setIsRemove] = useState<CheckedState>(true)
   const t = useTranslations('record.chat')
 
   async function handleTransform() {
@@ -53,9 +48,6 @@ export function NoteOutput({chat}: {chat: Chat}) {
     
     const store = await Store.load('store.json');
     await store.set('activeFilePath', title)
-    if (isRemove) {
-      deleteTag(currentTagId)
-    }
     setOpen(false)
     await loadFileTree()
     redirect('/core/article')
@@ -78,7 +70,6 @@ export function NoteOutput({chat}: {chat: Chat}) {
   }
 
   useEffect(() => {
-    setIsRemove(chat?.tagId !== 1)
     setTitle(extractTitle(chat?.content || '') + '.md')
     readArticleDir()
   }, [chat])
@@ -116,15 +107,6 @@ export function NoteOutput({chat}: {chat: Chat}) {
               </SelectContent>
             </Select>
             <Input className="border-none" value={title} onChange={(e) => setTitle(e.target.value)} />
-          </div>
-          <div className="flex items-center space-x-2 mt-2">
-            <Checkbox disabled={chat?.tagId === 1} id="terms" checked={isRemove} onCheckedChange={value => setIsRemove(value)} />
-            <label
-              htmlFor="terms"
-              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-            >
-              {t('note.deleteTag')}
-            </label>
           </div>
         </div>
         <DialogFooter>

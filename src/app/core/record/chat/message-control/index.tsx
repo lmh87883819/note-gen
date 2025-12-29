@@ -8,7 +8,7 @@ import { CopyControl } from "./copy-control"
 import { TooltipButton } from "@/components/tooltip-button"
 import { useTranslations } from 'next-intl';
 
-export default function MessageControl({chat, children}: {chat: Chat, children: React.ReactNode}) {
+export default function MessageControl({ chat, children }: { chat: Chat; children?: React.ReactNode }) {
   const { loading, deleteChat } = useChatStore()
   const [translatedContent, setTranslatedContent] = useState<string>('')
   const t = useTranslations('common')

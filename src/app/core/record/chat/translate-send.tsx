@@ -2,7 +2,6 @@
 import { Send, Square } from "lucide-react"
 import useSettingStore from "@/stores/setting"
 import useChatStore from "@/stores/chat"
-import useTagStore from "@/stores/tag"
 import { fetchAiStream } from "@/lib/ai"
 import { TooltipButton } from "@/components/tooltip-button"
 import { useImperativeHandle, forwardRef, useRef } from "react"
@@ -16,7 +15,6 @@ interface TranslateSendProps {
 
 export const TranslateSend = forwardRef<{ sendTranslate: () => void }, TranslateSendProps>(({ inputValue, onSent }, ref) => {
   const { primaryModel } = useSettingStore()
-  const { currentTagId } = useTagStore()
   const { insert, loading, setLoading, saveChat } = useChatStore()
   const abortControllerRef = useRef<AbortController | null>(null)
   const t = useTranslations()
@@ -32,7 +30,6 @@ export const TranslateSend = forwardRef<{ sendTranslate: () => void }, Translate
     
     setLoading(true)
     await insert({
-      tagId: currentTagId,
       role: 'user',
       content: inputValue,
       type: 'chat',
@@ -41,7 +38,6 @@ export const TranslateSend = forwardRef<{ sendTranslate: () => void }, Translate
     })
 
     const message = await insert({
-      tagId: currentTagId,
       role: 'system',
       content: '',
       type: 'chat',

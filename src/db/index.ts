@@ -13,15 +13,11 @@ export async function getDb() {
 export async function initAllDatabases() {
   // 引入各数据库初始化函数
   const { initChatsDb } = await import('./chats');
-  const { initMarksDb } = await import('./marks');
   const { initNotesDb } = await import('./notes');
-  const { initTagsDb } = await import('./tags');
   const { initVectorDb } = await import('./vector');
   
   // 执行初始化
   await initChatsDb();
-  await initMarksDb();
   await initNotesDb();
-  await initTagsDb();
   await initVectorDb();
 }

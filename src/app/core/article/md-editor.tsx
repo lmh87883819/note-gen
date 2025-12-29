@@ -24,14 +24,11 @@ import useSettingStore from '@/stores/setting'
 import { uploadImage } from '@/lib/imageHosting'
 import FloatBar from './floatbar'
 import { createToolbarConfig } from './toolbar.config'
-import { delMark } from '@/db/marks'
-import useMarkStore from '@/stores/mark'
 
 export function MdEditor() {
   const [editor, setEditor] = useState<Vditor>();
   const { currentArticle, saveCurrentArticle, loading, activeFilePath, matchPosition, setMatchPosition, setActiveFilePath, loadFileTree, setCurrentArticle } = useArticleStore()
   const { assetsPath, contentTextScale } = useSettingStore()
-  const { fetchMarks } = useMarkStore()
   const [floatBarPosition, setFloatBarPosition] = useState<{left: number, top: number} | null>(null)
   const [selectedText, setSelectedText] = useState<string>('')
   const [editorWidth, setEditorWidth] = useState<number>(0)
@@ -703,29 +700,14 @@ export function MdEditor() {
 
       if (!e.dataTransfer) return
 
-      // 获取拖放的文本内容和记录信息
+      // 获取拖放的文本内容
       const markdownContent = e.dataTransfer.getData('text/plain')
-      const markJson = e.dataTransfer.getData('application/json')
       
       if (markdownContent && editor) {
         // 光标位置已经在 dragover 时设置好了，直接插入内容
         // 不添加换行，允许插入到文本中间
         editor.insertValue(markdownContent)
         editor.focus()
-        
-        // 插入成功后删除记录
-        if (markJson) {
-          try {
-            const mark = JSON.parse(markJson)
-            if (mark.id) {
-              await delMark(mark.id)
-              // 刷新记录列表
-              await fetchMarks()
-            }
-          } catch (error) {
-            console.error('Failed to delete mark:', error)
-          }
-        }
       }
     }
 

@@ -10,7 +10,6 @@ import {
   BotMessageSquare, 
   Drama, 
   Languages, 
-  Link2, 
   FileText, 
   ServerCrash, 
   BookOpen, 
@@ -47,7 +46,6 @@ const TOOL_CONFIG_MAP: Record<string, { icon: React.ReactNode; labelKey: string 
   modelSelect: { icon: <BotMessageSquare className="size-4" />, labelKey: 'modelSelect.tooltip' },
   promptSelect: { icon: <Drama className="size-4" />, labelKey: 'promptSelect.tooltip' },
   chatLanguage: { icon: <Languages className="size-4" />, labelKey: 'chatLanguage.tooltip' },
-  chatLink: { icon: <Link2 className="size-4" />, labelKey: 'tagLink.on' },
   fileLink: { icon: <FileText className="size-4" />, labelKey: 'fileLink.tooltip' },
   mcpButton: { icon: <ServerCrash className="size-4" />, labelKey: 'mcp.tooltip' },
   ragSwitch: { icon: <BookOpen className="size-4" />, labelKey: 'rag.enabled' },
@@ -59,7 +57,7 @@ const TOOL_CONFIG_MAP: Record<string, { icon: React.ReactNode; labelKey: string 
 // 工具栏分组定义
 const TOOLBAR_GROUPS = {
   bottom: ['modelSelect', 'promptSelect', 'chatLanguage'],
-  topLeft: ['chatLink', 'fileLink', 'mcpButton', 'ragSwitch', 'chatPlaceholder'],
+  topLeft: ['fileLink', 'mcpButton', 'ragSwitch', 'chatPlaceholder'],
   topRight: ['clearContext', 'clearChat'],
 }
 

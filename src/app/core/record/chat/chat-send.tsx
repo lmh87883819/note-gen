@@ -2,8 +2,6 @@
 import { Send, Square } from "lucide-react"
 import useSettingStore from "@/stores/setting"
 import useChatStore from "@/stores/chat"
-import useTagStore from "@/stores/tag"
-import useMarkStore from "@/stores/mark"
 import { fetchAiStream } from "@/lib/ai"
 import { TooltipButton } from "@/components/tooltip-button"
 import { useImperativeHandle, forwardRef, useRef } from "react"
@@ -26,10 +24,7 @@ interface ChatSendProps {
 
 export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ inputValue, onSent, linkedFile }, ref) => {
   const { primaryModel } = useSettingStore()
-  const { currentTagId } = useTagStore()
   const { insert, loading, setLoading, saveChat, chats, chatMode, setAgentState } = useChatStore()
-  const { fetchMarks, marks } = useMarkStore()
-  const { isLinkMark } = useChatStore()
   const { isRagEnabled } = useVectorStore()
   const { selectedServerIds } = useMcpStore()
   const abortControllerRef = useRef<AbortController | null>(null)
@@ -66,7 +61,6 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
   async function handleAgentMode() {
     // 先创建一个占位的 AI 消息
     const placeholderMessage = await insert({
-      tagId: currentTagId,
       role: 'system',
       content: '',
       type: 'chat',
@@ -136,7 +130,6 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
     if (chatMode === 'agent') {
       setLoading(true)
       await insert({
-        tagId: currentTagId,
         role: 'user',
         content: inputValue,
         type: 'chat',
@@ -150,7 +143,6 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
     // Chat 模式（原有逻辑）
     setLoading(true)
     await insert({
-      tagId: currentTagId,
       role: 'user',
       content: inputValue,
       type: 'chat',
@@ -159,7 +151,6 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
     })
 
     const message = await insert({
-      tagId: currentTagId,
       role: 'system',
       content: '',
       type: 'chat',
@@ -168,12 +159,6 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
       ragSources: undefined,
     })
     if (!message) return
-
-    await fetchMarks()
-    const textMarks = isLinkMark ? marks.filter(item => item.type === 'text') : []
-    const imageMarks = isLinkMark ? marks.filter(item => item.type === 'image') : []
-    const linkMarks = isLinkMark ? marks.filter(item => item.type === 'link') : []
-    const fileMarks = isLinkMark ? marks.filter(item => item.type === 'file') : []
     const lastClearIndex = chats.findLastIndex(item => item.type === 'clear')
     const chatsAfterClear = chats.slice(lastClearIndex + 1)
     
@@ -227,19 +212,10 @@ ${ragContext}
     }
 
     const request_content = `
-      ${[...textMarks, ...imageMarks, ...fileMarks, ...linkMarks].length ? 'You can refer to the following content notes:' : ''}
-      ${textMarks.length ? 'The following are text copy records:' : ''}
-      ${textMarks.map((item, index) => `${index + 1}. ${item.content}`).join(';\n\n')}
-      ${imageMarks.length ? 'The following are image records:' : ''}
-      ${imageMarks.map((item, index) => `${index + 1}. ${item.content}`).join(';\n\n')}
-      ${linkMarks.length ? 'The following are link records:' : ''}
-      ${linkMarks.map((item, index) => `${index + 1}. ${item.content}`).join(';\n\n')}
-      ${fileMarks.length ? 'The following are file records:' : ''}
-      ${fileMarks.map((item, index) => `${index + 1}. ${item.content}`).join(';\n\n')}
       ${chatsAfterClear.length ? 'Refer to the following chat records:' : ''}
       ${
         chatsAfterClear
-          .filter((item) => item.tagId === currentTagId && item.type === "chat")
+          .filter((item) => item.type === "chat")
           .map((item, index) => `${index + 1}. ${item.content}`)
           .join(';\n\n')
       }

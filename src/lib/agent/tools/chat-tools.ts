@@ -1,22 +1,15 @@
 import { Tool, ToolResult } from '../types'
-import { getChats, insertChat, updateChat, deleteChat, clearChatsByTagId, Chat } from '@/db/chats'
+import { DEFAULT_CHAT_TAG_ID, getChats, insertChat, updateChat, deleteChat, clearChatsByTagId, Chat } from '@/db/chats'
 
 export const readChatsTool: Tool = {
   name: 'read_chats',
-  description: '读取指定标签下的所有对话记录',
+  description: '读取所有对话记录',
   category: 'chat',
   requiresConfirmation: false,
-  parameters: [
-    {
-      name: 'tagId',
-      type: 'number',
-      description: '标签ID',
-      required: true,
-    },
-  ],
-  execute: async (params): Promise<ToolResult> => {
+  parameters: [],
+  execute: async (): Promise<ToolResult> => {
     try {
-      const chats = await getChats(params.tagId)
+      const chats = await getChats()
       return {
         success: true,
         data: chats,
@@ -38,12 +31,6 @@ export const createChatTool: Tool = {
   requiresConfirmation: false,
   parameters: [
     {
-      name: 'tagId',
-      type: 'number',
-      description: '标签ID',
-      required: true,
-    },
-    {
       name: 'content',
       type: 'string',
       description: '对话内容',
@@ -58,7 +45,7 @@ export const createChatTool: Tool = {
     {
       name: 'type',
       type: 'string',
-      description: '类型：chat, note, clipboard, clear',
+      description: '类型：chat, note, clear',
       required: false,
       default: 'chat',
     },
@@ -66,10 +53,10 @@ export const createChatTool: Tool = {
   execute: async (params): Promise<ToolResult> => {
     try {
       const chat: Omit<Chat, 'id' | 'createdAt'> = {
-        tagId: params.tagId,
+        tagId: DEFAULT_CHAT_TAG_ID,
         content: params.content,
         role: params.role as 'system' | 'user',
-        type: (params.type || 'chat') as 'chat' | 'note' | 'clipboard' | 'clear',
+        type: (params.type || 'chat') as 'chat' | 'note' | 'clear',
         inserted: false,
       }
       const result = await insertChat(chat)
@@ -114,7 +101,7 @@ export const updateChatTool: Tool = {
   ],
   execute: async (params): Promise<ToolResult> => {
     try {
-      const chats = await getChats(params.tagId || 1)
+      const chats = await getChats()
       const chat = chats.find(c => c.id === params.id)
       
       if (!chat) {
@@ -175,23 +162,16 @@ export const deleteChatTool: Tool = {
 
 export const clearChatsTool: Tool = {
   name: 'clear_chats',
-  description: '清空指定标签下的所有对话记录',
+  description: '清空所有对话记录',
   category: 'chat',
   requiresConfirmation: true,
-  parameters: [
-    {
-      name: 'tagId',
-      type: 'number',
-      description: '标签ID',
-      required: true,
-    },
-  ],
-  execute: async (params): Promise<ToolResult> => {
+  parameters: [],
+  execute: async (): Promise<ToolResult> => {
     try {
-      await clearChatsByTagId(params.tagId)
+      await clearChatsByTagId()
       return {
         success: true,
-        message: `成功清空标签 ${params.tagId} 下的所有对话记录`,
+        message: `成功清空所有对话记录`,
       }
     } catch (error) {
       return {
@@ -214,16 +194,10 @@ export const searchChatsTool: Tool = {
       description: '搜索关键词',
       required: true,
     },
-    {
-      name: 'tagId',
-      type: 'number',
-      description: '可选：限制在指定标签下搜索',
-      required: false,
-    },
   ],
   execute: async (params): Promise<ToolResult> => {
     try {
-      const chats = await getChats(params.tagId || 1)
+      const chats = await getChats()
       const results = chats.filter(chat => 
         chat.content?.toLowerCase().includes(params.query.toLowerCase())
       )

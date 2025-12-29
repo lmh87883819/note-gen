@@ -1,7 +1,9 @@
 import { getDb } from "./index"
 
 export type Role = 'system' | 'user'
-export type ChatType = 'chat' | 'note' | 'clipboard' | 'clear'
+export type ChatType = 'chat' | 'note' | 'clear'
+
+export const DEFAULT_CHAT_TAG_ID = 1
 
 export interface Chat {
   id: number
@@ -33,7 +35,7 @@ export async function initChatsDb() {
       agentHistory text default null
     )
   `)
-  
+
   // 迁移：为现有表添加 ragSources 列（如果不存在）
   try {
     await db.execute(`
@@ -43,7 +45,7 @@ export async function initChatsDb() {
     // 如果列已存在，忽略错误
     // SQLite 会抛出 "duplicate column name" 错误
   }
-  
+
   // 迁移：为现有表添加 agentHistory 列（如果不存在）
   try {
     await db.execute(`
@@ -55,16 +57,18 @@ export async function initChatsDb() {
 }
 
 // 插入一条 chat
-export async function insertChat(chat: Omit<Chat, 'id' | 'createdAt'>) {
+export async function insertChat(chat: Omit<Chat, 'id' | 'createdAt' | 'tagId'> & { tagId?: number }) {
   const db = await getDb()
-  const createdAt = Date.now();
+  const createdAt = Date.now()
+  const tagId = chat.tagId ?? DEFAULT_CHAT_TAG_ID
   return await db.execute(
     "insert into chats (tagId, content, role, type, image, inserted, createdAt, ragSources, agentHistory) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
-    [chat.tagId, chat.content, chat.role, chat.type, chat.image, chat.inserted ? 1 : 0, createdAt, chat.ragSources, chat.agentHistory])
+    [tagId, chat.content, chat.role, chat.type, chat.image, chat.inserted ? 1 : 0, createdAt, chat.ragSources, chat.agentHistory]
+  )
 }
 
 // 获取所有 chats
-export async function getChats(tagId: number) {
+export async function getChats(tagId: number = DEFAULT_CHAT_TAG_ID) {
   const db = await getDb()
   const result = await db.select<Chat[]>(
     "select * from chats where tagId = $1 order by createdAt",
@@ -108,15 +112,17 @@ export async function updateChat(chat: Chat) {
   const db = await getDb()
   return await db.execute(
     "update chats set content = $1, role = $2, type = $3, image = $4, inserted = $5, ragSources = $6, agentHistory = $7 where id = $8",
-    [chat.content, chat.role, chat.type, chat.image, chat.inserted ? 1 : 0, chat.ragSources, chat.agentHistory, chat.id])
+    [chat.content, chat.role, chat.type, chat.image, chat.inserted ? 1 : 0, chat.ragSources, chat.agentHistory, chat.id]
+  )
 }
 
 // 清空 tagId 下的所有 chats
-export async function clearChatsByTagId(tagId: number) {
+export async function clearChatsByTagId(tagId: number = DEFAULT_CHAT_TAG_ID) {
   const db = await getDb()
   return await db.execute(
     "delete from chats where tagId = $1",
-    [tagId])
+    [tagId]
+  )
 }
 
 // 已插入
@@ -124,7 +130,8 @@ export async function updateChatsInsertedById(id: number) {
   const db = await getDb()
   return await db.execute(
     "update chats set inserted = $1 where id = $2",
-    [true, id])
+    [true, id]
+  )
 }
 
 // 删除一条 chat
@@ -132,5 +139,6 @@ export async function deleteChat(id: number) {
   const db = await getDb()
   return await db.execute(
     "delete from chats where id = $1",
-    [id])
+    [id]
+  )
 }

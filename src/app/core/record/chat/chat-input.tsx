@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react"
 import useSettingStore from "@/stores/setting"
 import { Textarea } from "@/components/ui/textarea"
 import useChatStore from "@/stores/chat"
-import useMarkStore from "@/stores/mark"
 import useArticleStore from "@/stores/article"
 import { fetchAiPlaceholder } from "@/lib/ai"
 import { useTranslations } from 'next-intl'
@@ -16,7 +15,6 @@ import { ChatLanguage } from "./chat-language"
 import { ChatSend } from "./chat-send"
 import { LinkedFileDisplay, FileLink } from "./file-link"
 import { FileSelector } from "./file-selector"
-import { ChatLink } from "./chat-link"
 import { McpButton } from "./mcp-button"
 import { RagSwitch } from "./rag-switch"
 import ChatPlaceholder from "./chat-placeholder"
@@ -46,9 +44,8 @@ import { CSS } from '@dnd-kit/utilities'
 export function ChatInput() {
   const [text, setText] = useState("")
   const { primaryModel, chatToolbarConfigPc, setChatToolbarConfigPc, chatToolbarConfigMobile } = useSettingStore()
-  const { chats, loading, isLinkMark, isPlaceholderEnabled } = useChatStore()
+  const { chats, loading, isPlaceholderEnabled } = useChatStore()
   const [showFileSelector, setShowFileSelector] = useState(false)
-  const { marks, trashState } = useMarkStore()
   const { activeFilePath } = useArticleStore()
   const [isComposing, setIsComposing] = useState(false)
   const [placeholder, setPlaceholder] = useState('')
@@ -127,24 +124,18 @@ export function ChatInput() {
   async function genInputPlaceholder() {
     setPlaceholder(t('record.chat.input.placeholder.default'))
     if (!primaryModel) return
-    if (trashState) return
     // 检查是否启用了AI占位符功能
     if (!isPlaceholderEnabled) {
       setPlaceholder(t('record.chat.input.placeholder.default'))
       return
     }
-    const textMarks = isLinkMark ? marks.filter(item => item.type === 'text') : []
-    const imageMarks = isLinkMark ? marks.filter(item => item.type === 'image') : []
-    const fileMarks = isLinkMark ? marks.filter(item => item.type === 'file') : []
-    const linkMarks = isLinkMark ? marks.filter(item => item.type === 'link') : []
     const lastClearIndex = chats.findLastIndex(item => item.type === 'clear')
     const chatsAfterClear = chats.slice(lastClearIndex + 1)
     const request_content = `
-      ${[...textMarks, ...imageMarks, ...fileMarks, ...linkMarks]
+      ${chatsAfterClear
         .slice(0, 5)
         .map(item => item.content?.replace(/<thinking>[\s\S]*?<thinking>/g, '').slice(0, 60))
         .join(';\n\n')}
-      ${chatsAfterClear.slice(0, 5).map(item => item.content?.replace(/<thinking>[\s\S]*?<thinking>/g, '').slice(0, 60)).join(';\n\n')}
     `.trim()
     // 使用非流式请求获取placeholder内容
     const content = await fetchAiPlaceholder(request_content)
@@ -191,16 +182,12 @@ export function ChatInput() {
       setPlaceholder(t('record.chat.input.placeholder.noPrimaryModel'))
       return
     }
-    if (marks.length === 0) {
-      setPlaceholder(t('record.chat.input.placeholder.default'))
-      return
-    }
     if (!isPlaceholderEnabled) {
       setPlaceholder(t('record.chat.input.placeholder.default'))
       return
     }
     genInputPlaceholder()
-  }, [primaryModel, marks, isLinkMark, isPlaceholderEnabled, t])
+  }, [primaryModel, chats, isPlaceholderEnabled, t])
 
   useEffect(() => {
     if (!isPlaceholderEnabled) {
@@ -347,8 +334,6 @@ export function ChatInput() {
                         return <PromptSelect key={item.id} />
                       case 'chatLanguage':
                         return <ChatLanguage key={item.id} />
-                      case 'chatLink':
-                        return <ChatLink key={item.id} />
                       case 'fileLink':
                         return <FileLink key={item.id} onFileLinkClick={() => setShowFileSelector(true)} disabled={!primaryModel || loading} />
                       case 'mcpButton':

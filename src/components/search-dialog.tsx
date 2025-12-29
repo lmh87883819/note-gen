@@ -13,12 +13,7 @@ import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/u
 import { LocateFixed, SearchX } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import useArticleStore from '@/stores/article'
-import useMarkStore from '@/stores/mark'
-import useTagStore from '@/stores/tag'
-import { useSidebarStore } from '@/stores/sidebar'
 import { useRouter } from 'next/navigation'
-import emitter from '@/lib/emitter'
-import { EmitterRecordEvents } from '@/config/emitters'
 
 interface SearchDialogProps {
   open: boolean
@@ -33,10 +28,6 @@ interface SearchResult {
   desc?: string
   title?: string
   searchType?: string
-  tagId?: number
-  tagName?: string
-  type?: string
-  url?: string
   matchText?: string
   matchIndices?: number[]
 }
@@ -47,9 +38,6 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
   const [searchValue, setSearchValue] = useState('')
   const [searchResult, setSearchResult] = useState<SearchResult[]>([])
   const { allArticle, loadAllArticle, setActiveFilePath, setMatchPosition, setCollapsibleList } = useArticleStore()
-  const { allMarks, fetchAllMarks } = useMarkStore()
-  const { tags, fetchTags, setCurrentTagId } = useTagStore()
-  const { setLeftSidebarTab } = useSidebarStore()
 
   function extractTitleFromPath(path: string): string {
     if (!path) return ''
@@ -86,55 +74,11 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
       }
     })
     
-    // 搜索记录
-    allMarks.forEach((item, index) => {
-      const tag = tags.find(tag => tag.id === item.tagId)
-      const searchText = `${item.content || ''} ${item.desc || ''} ${tag?.name || ''}`.toLowerCase()
-      
-      if (searchText.includes(query)) {
-        const matchIndex = searchText.indexOf(query)
-        results.push({
-          id: `mark-${index}-${item.id}`,
-          searchType: 'record',
-          content: item.content,
-          article: item.content,
-          title: item.desc || item.content?.slice(0, 50),
-          path: tag?.name || 'Record',
-          tagName: tag?.name,
-          tagId: item.tagId,
-          type: item.type,
-          url: item.url,
-          desc: item.desc,
-          matchText: item.content,
-          matchIndices: [matchIndex]
-        })
-      }
-    })
-    
     setSearchResult(results)
   }
 
   async function handleSelect(item: SearchResult) {
-    // 如果是记录类型，跳转到记录页面并设置对应的 tag
-    if (item.searchType === 'record') {
-      onOpenChange(false)
-      
-      // 切换到记录标签页
-      await setLeftSidebarTab('notes')
-      
-      if (item.tagId) {
-        await setCurrentTagId(item.tagId)
-      }
-      
-      emitter.emit(EmitterRecordEvents.refreshMarks)
-
-      return
-    }
-    
     onOpenChange(false)
-    
-    // 切换到笔记标签页
-    await setLeftSidebarTab('files')
     
     // 如果是文章类型，跳转到文章页面
     if (item.matchIndices && item.matchIndices.length > 0) {
@@ -173,14 +117,12 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
   useEffect(() => {
     if (open) {
       loadAllArticle()
-      fetchAllMarks()
-      fetchTags()
     }
   }, [open])
 
   useEffect(() => {
     search(searchValue)
-  }, [searchValue, allArticle, allMarks, tags])
+  }, [searchValue, allArticle])
 
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange}>
@@ -232,11 +174,11 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
                     <div className="flex items-center gap-2 min-w-0">
                       <LocateFixed className="size-3.5 text-cyan-900 dark:text-cyan-400 shrink-0" />
                       <Badge variant="secondary" className="text-xs">
-                        {item.searchType === 'record' ? t('search.item.record') : t('search.item.article')}
+                        {t('search.item.article')}
                       </Badge>
                     </div>
                     <div className="text-xs text-muted-foreground truncate max-w-[200px]">
-                      {item.searchType === 'record' ? (item.tagName || t('search.item.record')) : item.path}
+                      {item.path}
                     </div>
                   </div>
                   <div className="text-xs text-muted-foreground line-clamp-2 w-full">

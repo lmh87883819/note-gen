@@ -4,7 +4,6 @@ import { uploadImageByGithub } from '@/lib/imageHosting/github'
 import { useEffect, useState } from 'react'
 import { ImageCard } from './image-card'
 import useImageStore from '@/stores/imageHosting'
-import useMarkStore from '@/stores/mark'
 import { ImageHeader } from './image-header'
 import { NoData } from './no-data'
 import { v4 as uuid } from 'uuid'
@@ -26,7 +25,6 @@ export default function Page() {
   const [githubImageUsername, setGithubImageUsername] = useState('')
 
   const { images, getImages, pushImage } = useImageStore()
-  const { fetchAllMarks } = useMarkStore()
 
   async function init() {
     const store = await Store.load('store.json');
@@ -106,7 +104,6 @@ export default function Page() {
   useEffect(() => {
     if (githubImageUsername && images.length === 0) {
       getImages()
-      fetchAllMarks()
     }
   }, [githubImageUsername])
 

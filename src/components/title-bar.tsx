@@ -10,13 +10,8 @@ import { useTranslations } from 'next-intl'
 import { useSidebarStore } from '@/stores/sidebar'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Button } from '@/components/ui/button'
-import useSettingStore from '@/stores/setting'
 import useArticleStore from '@/stores/article'
 import React from 'react'
-import { ControlText } from '@/app/core/record/mark/control-text'
-import { ControlImage } from '@/app/core/record/mark/control-image'
-import { ControlLink } from '@/app/core/record/mark/control-link'
-import { ControlFile } from '@/app/core/record/mark/control-file'
 
 type Platform = 'macos' | 'windows' | 'linux' | 'unknown'
 
@@ -30,7 +25,6 @@ export function TitleBar({ onSearchClick }: TitleBarProps) {
   const pathname = usePathname()
   const router = useRouter()
   const { leftSidebarVisible, rightSidebarVisible, toggleLeftSidebar, toggleRightSidebar } = useSidebarStore()
-  const { recordToolbarConfig } = useSettingStore()
   const { activeFilePath } = useArticleStore()
   const t = useTranslations()
 
@@ -114,28 +108,8 @@ export function TitleBar({ onSearchClick }: TitleBarProps) {
         }}
         data-tauri-drag-region
       >
-        {/* 左侧记录工具栏按钮 */}
-        <div className="flex items-center gap-0.5 px-2 shrink-0" data-tauri-drag-region="false">
-          <TooltipProvider>
-            {recordToolbarConfig
-              .filter(item => item.enabled)
-              .sort((a, b) => a.order - b.order)
-              .map(item => {
-                switch (item.id) {
-                  case 'text':
-                    return <ControlText key={item.id} />
-                  case 'image':
-                    return <ControlImage key={item.id} />
-                  case 'link':
-                    return <ControlLink key={item.id} />
-                  case 'file':
-                    return <ControlFile key={item.id} />
-                  default:
-                    return null
-                }
-              })}
-          </TooltipProvider>
-        </div>
+        {/* 左侧记录工具栏按钮（已移除） */}
+        <div className="flex items-center gap-0.5 px-2 shrink-0" data-tauri-drag-region="false" />
 
         {/* 中间搜索输入框 */}
         <div className="flex-1 flex items-center justify-center px-4 min-w-[200px] max-w-[600px] mx-auto">

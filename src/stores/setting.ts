@@ -11,12 +11,6 @@ export interface ChatToolbarItem {
   order: number
 }
 
-export interface RecordToolbarItem {
-  id: string
-  enabled: boolean
-  order: number
-}
-
 const createSettingStore = (set: any, get: any) => ({
   initSettingData: async () => {
     const store = await Store.load('store.json');
@@ -374,7 +368,6 @@ const createSettingStore = (set: any, get: any) => ({
     { id: 'promptSelect', enabled: true, order: 1 },
     { id: 'chatLanguage', enabled: true, order: 2 },
     // 顶部工具栏 - 左侧
-    { id: 'chatLink', enabled: true, order: 3 },
     { id: 'fileLink', enabled: true, order: 4 },
     { id: 'mcpButton', enabled: true, order: 5 },
     { id: 'ragSwitch', enabled: true, order: 6 },
@@ -395,7 +388,6 @@ const createSettingStore = (set: any, get: any) => ({
     { id: 'modelSelect', enabled: true, order: 0 },
     { id: 'promptSelect', enabled: true, order: 1 },
     { id: 'chatLanguage', enabled: true, order: 2 },
-    { id: 'chatLink', enabled: true, order: 3 },
     { id: 'fileLink', enabled: true, order: 4 },
     { id: 'mcpButton', enabled: true, order: 5 },
     { id: 'ragSwitch', enabled: true, order: 6 },
@@ -410,19 +402,6 @@ const createSettingStore = (set: any, get: any) => ({
     await store.save()
   },
 
-  // 记录工具栏配置
-  recordToolbarConfig: [
-    { id: 'text', enabled: true, order: 0 },
-    { id: 'image', enabled: true, order: 1 },
-    { id: 'link', enabled: true, order: 2 },
-    { id: 'file', enabled: true, order: 3 },
-  ],
-  setRecordToolbarConfig: async (config: RecordToolbarItem[]) => {
-    set({ recordToolbarConfig: config })
-    const store = await Store.load('store.json');
-    await store.set('recordToolbarConfig', config)
-    await store.save()
-  },
 })
 
 export type SettingState = ReturnType<typeof createSettingStore>

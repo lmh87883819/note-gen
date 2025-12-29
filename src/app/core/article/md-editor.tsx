@@ -27,6 +27,7 @@ import { createToolbarConfig } from './toolbar.config'
 
 export function MdEditor() {
   const [editor, setEditor] = useState<Vditor>();
+  const editorRef = useRef<Vditor | null>(null)
   const { currentArticle, saveCurrentArticle, loading, activeFilePath, matchPosition, setMatchPosition, setActiveFilePath, loadFileTree, setCurrentArticle } = useArticleStore()
   const { assetsPath, contentTextScale } = useSettingStore()
   const [floatBarPosition, setFloatBarPosition] = useState<{left: number, top: number} | null>(null)
@@ -39,6 +40,7 @@ export function MdEditor() {
   const [isDraggingOver, setIsDraggingOver] = useState(false)
   const isCreatingFileRef = useRef(false)
   const activeFilePathRef = useRef(activeFilePath)
+  const isReinitializingRef = useRef(false)
 
   function getLang() {
     switch (currentLocale) {
@@ -116,7 +118,9 @@ export function MdEditor() {
         ]
       },
       after: () => {
+        editorRef.current = vditor
         setEditor(vditor);
+        isReinitializingRef.current = false
         // 切换记录编辑模式
         const editModeButtons = vditor.vditor.element.querySelectorAll('.edit-mode-button .vditor-hint button')
         editModeButtons.forEach(button => {
@@ -314,10 +318,11 @@ export function MdEditor() {
 
   // 设置编辑器内容并滚动到匹配位置
   const setContent = (content: string) => {
-    if (!editor) return
+    const instance = editorRef.current || editor
+    if (!instance) return
     try {
-      editor.setValue(content, false)
-      editor.renderPreview(content)
+      instance.setValue(content, false)
+      instance.renderPreview(content)
     } catch (error) {
       console.error('Error setting editor content:', error)
     }
@@ -329,7 +334,7 @@ export function MdEditor() {
           let editorElement: HTMLElement | null = null
           
           // 安全地访问 vditor 属性
-          const vditor = editor as any
+          const vditor = instance as any
           if (vditor.vditor) {
             if (localMode === 'ir' && vditor.vditor.ir) {
               editorElement = vditor.vditor.ir.element
@@ -406,11 +411,12 @@ export function MdEditor() {
   }
 
   function setTheme(theme: string) {
-    if (editor) {
+    const instance = editorRef.current || editor
+    if (instance) {
       const editorTheme = theme === 'dark' ? 'dark' : 'light'
       const contentTheme = theme === 'dark' ? 'dark' : 'light'
       const codeTheme = theme === 'dark' ? 'github-dark' : 'github-light'
-      editor.setTheme(editorTheme === 'dark' ? 'dark' : 'classic', contentTheme, codeTheme)
+      instance.setTheme(editorTheme === 'dark' ? 'dark' : 'classic', contentTheme, codeTheme)
     }
   }
 
@@ -428,9 +434,11 @@ export function MdEditor() {
 
   useEffect(() => {
     if (!editor) {
-      init()
-      if (activeFilePath) {
-        setContent(currentArticle)
+      if (!isReinitializingRef.current) {
+        init()
+        if (activeFilePath) {
+          setContent(currentArticle)
+        }
       }
     } else {
       // 如果文件被删除或取消选中，清空编辑器
@@ -442,8 +450,13 @@ export function MdEditor() {
   }, [activeFilePath])
 
   useEffect(() => {
-    if (editor) {
-      editor.destroy()
+    isReinitializingRef.current = true
+    const instance = editorRef.current || editor
+    if (instance) {
+      try {
+        instance.destroy()
+      } catch {}
+      editorRef.current = null
       setEditor(undefined)
     }
     init()
@@ -468,7 +481,7 @@ export function MdEditor() {
     } else {
       editorTheme = theme
     }
-    if (editor) {
+    if (editorRef.current || editor) {
       setTheme(editorTheme || 'light')
     }
   }, [theme, editor])
@@ -490,22 +503,22 @@ export function MdEditor() {
   useEffect(() => {
     if (activeFilePath) {
       setContent(currentArticle)
-      editor?.clearStack()
-      if (!editor) return
-      handleLocalImage(editor)
+      const instance = editorRef.current || editor
+      instance?.clearStack()
+      if (!instance) return
+      handleLocalImage(instance)
     }
   }, [currentArticle, editor, activeFilePath])
 
   useEffect(() => {
-    window.addEventListener('resize', () => {
-      if (!editor) return
-      setEditorPadding(editor)
-    })
+    const handler = () => {
+      const instance = editorRef.current || editor
+      if (!instance) return
+      setEditorPadding(instance)
+    }
+    window.addEventListener('resize', handler)
     return () => {
-      window.removeEventListener('resize', () => {
-        if (!editor) return
-        setEditorPadding(editor)
-      })
+      window.removeEventListener('resize', handler)
     }
   }, [editor])
 
@@ -554,10 +567,14 @@ export function MdEditor() {
                 const enableOutline = await s.get<boolean>('enableOutline') || false
                 const enableLineNumber = await s.get<boolean>('enableLineNumber') || false
                 
-                const currentContent = editor.getValue()
+                const latestArticle = useArticleStore.getState().currentArticle
+                const currentContent = latestArticle || editor.getValue()
                 const currentMode = editor.vditor.currentMode
-                
+
+                isReinitializingRef.current = true
                 editor.destroy()
+                editorRef.current = null
+                setEditor(undefined)
                 
                 const vditor = new Vditor('aritcle-md-editor', {
                   lang: getLang(),
@@ -581,6 +598,8 @@ export function MdEditor() {
                   after: () => {
                     vditor.setValue(currentContent, false)
                     setEditor(vditor)
+                    editorRef.current = vditor
+                    isReinitializingRef.current = false
                     setEditorPadding(vditor)
                   },
                   input: (value) => {

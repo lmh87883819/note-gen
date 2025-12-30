@@ -39,7 +39,8 @@ export class AgentHandler {
         // 在新迭代开始时，将当前思考保存到历史
         const currentState = useChatStore.getState()
         if (currentState.agentState.currentThought) {
-          const newHistory = [...currentState.agentState.thoughtHistory, currentState.agentState.currentThought]
+          // 保留最近一段思考历史即可，UI 会合并展示
+          const newHistory = [...currentState.agentState.thoughtHistory, currentState.agentState.currentThought].slice(-10)
           store.setAgentState({ 
             thoughtHistory: newHistory,
             currentThought: ''

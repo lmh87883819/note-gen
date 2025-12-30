@@ -100,10 +100,9 @@ export class ReActAgent {
       const { content, toolCalls, thought } = await this.callModel(openai, aiConfig.model, messages, tools, aiConfig.temperature, aiConfig.topP)
       if (this.stopped) return ''
 
+      // 只展示“推理/思考”通道，避免把最终输出/Markdown 当成思考过程导致 UI 出现一长串标题
       if (thought) {
         this.config.onThought?.(thought)
-      } else if (content) {
-        this.config.onThought?.(content)
       }
 
       if (!toolCalls.length) {
@@ -300,10 +299,9 @@ export class ReActAgent {
         }
       }
 
+      // 只在模型提供 reasoning_content 时更新“思考”展示；不要用内容流填充思考区
       if (thought) {
         this.config.onThought?.(thought)
-      } else if (fullContent) {
-        this.config.onThought?.(fullContent)
       }
     }
 

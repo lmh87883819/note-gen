@@ -7,10 +7,11 @@ import QuoteToChat from "./quote";
 import Vditor from "vditor";
 
 export default function FloatBar({left, top, value, editor}: {left?: number, top?: number, value?: string, editor?: Vditor}) {
+  const isVisible = left !== undefined && top !== undefined
   return (
     <div
-      className={`${(left && top ) ? 'block': 'hidden'} absolute shadow rounded-lg bg-primary text-primary-foreground p-1`}
-      style={{left: left + 'px', top: (top || 0) < 64 ? (top || 0) + 82 + 'px' : (top || 0) + 'px'}}>
+      className={`${isVisible ? 'block' : 'hidden'} absolute shadow rounded-lg bg-primary text-primary-foreground p-1`}
+      style={{left: (left ?? 0) + 'px', top: (top ?? 0) < 64 ? (top ?? 0) + 82 + 'px' : (top ?? 0) + 'px'}}>
       <div className="flex items-center justify-between">
         <div className="flex items-center">
           <QuoteToChat editor={editor} value={value} />

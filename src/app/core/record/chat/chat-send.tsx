@@ -40,7 +40,10 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
   }))
 
   // Agent 模式处理
-  async function handleAgentMode(userInput: string) {
+  async function handleAgentMode(
+    userInput: string,
+    opts: { linkedFiles?: WorkspaceFile[]; linkedSnippets?: { id: string; filePath: string; snippet: string }[] } = {}
+  ) {
     // 先创建一个占位的 AI 消息
     const placeholderMessage = await insert({
       role: 'system',
@@ -52,7 +55,7 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
     if (!placeholderMessage) return
 
     // Agent 上下文：把 @ 引用的文件内容作为 context 传入（避免污染用户输入本身）
-    const attachments = await buildLinkedFileAttachments(linkedFiles)
+    const attachments = await buildLinkedFileAttachments(opts.linkedFiles)
     const inlineImageUrls = (inlineImages || []).map(i => i.dataUrl).filter(Boolean)
     const imageUrls = [...attachments.imageUrls, ...inlineImageUrls]
     const agentContext = buildAgentContext({
@@ -60,7 +63,7 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
       currentArticle,
       agentMemorySummary,
       linkedFilesContext: attachments.textContext,
-      linkedSnippets,
+      linkedSnippets: opts.linkedSnippets,
       chats,
     })
 
@@ -123,7 +126,7 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
     agentHandlerRef.current = agentHandler
 
     try {
-      await agentHandler.execute(userInput, { agentContext, selectedSnippets: linkedSnippets })
+      await agentHandler.execute(userInput, { agentContext, selectedSnippets: opts.linkedSnippets })
     } catch (error) {
       console.error('Agent execution error:', error)
     } finally {
@@ -134,14 +137,24 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
 
   // 对话
   async function handleSubmit() {
+    const linkedFilesSnapshot = linkedFiles || []
+    const linkedSnippetsSnapshot = linkedSnippets || []
+
     const hasAnyAttachment =
-      (linkedFiles?.length || 0) > 0 ||
-      (linkedSnippets?.length || 0) > 0 ||
+      (linkedFilesSnapshot.length || 0) > 0 ||
+      (linkedSnippetsSnapshot.length || 0) > 0 ||
       (inlineImages?.length || 0) > 0
 
     if (!inputValue.trim() && !hasAnyAttachment) return
     const effectiveInputValue = inputValue.trim() ? inputValue : '[Attachments]'
     onSent?.()
+
+    const serializedLinkedFiles = linkedFilesSnapshot.length
+      ? JSON.stringify(linkedFilesSnapshot.map(f => ({ path: f.path, name: f.name, relativePath: f.relativePath })))
+      : undefined
+    const serializedLinkedSnippets = linkedSnippetsSnapshot.length
+      ? JSON.stringify(linkedSnippetsSnapshot.map(s => ({ filePath: s.filePath, snippet: s.snippet })))
+      : undefined
     
     // Agent 模式
     if (chatMode === 'agent') {
@@ -151,8 +164,10 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
         content: effectiveInputValue,
         type: 'chat',
         inserted: false,
+        linkedFiles: serializedLinkedFiles,
+        linkedSnippets: serializedLinkedSnippets,
       })
-      await handleAgentMode(effectiveInputValue)
+      await handleAgentMode(effectiveInputValue, { linkedFiles: linkedFilesSnapshot, linkedSnippets: linkedSnippetsSnapshot })
       setLoading(false)
       return
     }
@@ -165,6 +180,8 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
       type: 'chat',
       inserted: false,
       image: undefined,
+      linkedFiles: serializedLinkedFiles,
+      linkedSnippets: serializedLinkedSnippets,
     })
 
     const message = await insert({
@@ -182,11 +199,11 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
     // 准备请求内容
     let ragContext = ''
     let ragSources: string[] = []
-    const attachments = await buildLinkedFileAttachments(linkedFiles)
+    const attachments = await buildLinkedFileAttachments(linkedFilesSnapshot)
     const inlineImageUrls = (inlineImages || []).map(i => i.dataUrl).filter(Boolean)
     const imageUrls = [...attachments.imageUrls, ...inlineImageUrls]
     const linkedFilesContent = attachments.textContext
-    const snippetContext = buildSnippetContext(linkedSnippets)
+    const snippetContext = buildSnippetContext(linkedSnippetsSnapshot)
     
     // 如果启用RAG，获取相关上下文
     if (isRagEnabled) {

@@ -371,6 +371,10 @@ export function ChatInput() {
     }
 
     for (const textNode of textNodes) {
+      const parent = textNode.parentElement
+      if (parent?.dataset?.mention === 'file' || parent?.dataset?.mention === 'snippet') {
+        continue
+      }
       if (!textNode.data?.includes('@')) continue
       textNode.data = textNode.data.replace(/@/g, '')
     }

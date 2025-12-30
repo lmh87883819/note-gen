@@ -1,10 +1,6 @@
 import useChatStore from "@/stores/chat";
 import {
   ArrowDownToLine,
-  BotMessageSquare,
-  LoaderPinwheel,
-  Undo2,
-  UserRound,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -17,13 +13,25 @@ import ChatEmpty from "./chat-empty";
 import { useTranslations } from "next-intl";
 import ChatThinking from "./chat-thinking";
 import { Separator } from "@/components/ui/separator";
-import { scrollToBottom } from "@/lib/utils";
+import { cn, scrollToBottom } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import emitter from "@/lib/emitter";
 import { RagSources } from "./rag-sources";
 import { McpToolCallCard } from "./mcp-tool-call";
 import { AgentExecutionStatus } from "./agent-execution-status";
 import { AgentHistory } from "./agent-history";
+
+type LinkedFileRef = { path: string; name?: string; relativePath?: string };
+type LinkedSnippetRef = { filePath: string; snippet: string };
+
+function parseJsonArray<T>(value?: string): T[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
+  } catch {
+    return [];
+  }
+}
 
 export default function ChatContent() {
   const { chats, init, agentState } = useChatStore();
@@ -69,7 +77,7 @@ export default function ChatContent() {
   return (
     <div
       id="chats-wrapper"
-      className="flex-1 relative overflow-y-auto overflow-x-hidden w-full flex flex-col items-end p-4 gap-6"
+      className="flex-1 relative overflow-y-auto overflow-x-hidden w-full flex flex-col items-stretch p-3 gap-3"
     >
       {chats.length ? (
         chats.map((chat) => {
@@ -101,38 +109,21 @@ function MessageWrapper({
   chat: Chat;
   children: React.ReactNode;
 }) {
-  const { chats, loading } = useChatStore();
-
-  const revertChat = () => {
-    emitter.emit("revertChat", chat.content);
-  };
-
-  const index = chats.findIndex((item) => item.id === chat.id);
   return (
-    <div className="flex w-full md:gap-4">
-      {chat.role === "user" ? (
-        <div className="relative">
-          <div className="rounded size-6 items-center justify-center hidden md:flex">
-            <UserRound />
-          </div>
-          <Button
-            onClick={revertChat}
-            size="icon"
-            className="absolute top-0 right-0 hidden group-hover:flex"
-          >
-            <Undo2 />
-          </Button>
-        </div>
-      ) : (
-        <div className="hidden md:flex">
-          {loading && index === chats.length - 1 && chat.type === "chat" ? (
-            <LoaderPinwheel className="animate-spin" />
-          ) : (
-            <BotMessageSquare />
-          )}
-        </div>
+    <div
+      className={cn(
+        "flex w-full",
+        chat.role === "user" ? "justify-end" : "justify-start"
       )}
-      <div className="text-[12px] leading-6 flex-1 break-words">{children}</div>
+    >
+      <div
+        className={cn(
+          "chat-bubble",
+          chat.role === "user" ? "chat-bubble-user" : "chat-bubble-agent"
+        )}
+      >
+        <div className="text-[12px] leading-6 break-words">{children}</div>
+      </div>
     </div>
   );
 }
@@ -146,12 +137,11 @@ function AgentExecutionStatusWrapper() {
   }
 
   return (
-    <div className="flex w-full md:gap-4">
-      <div className="hidden md:flex">
-        <LoaderPinwheel className="animate-spin" />
-      </div>
-      <div className="text-sm leading-6 flex-1 break-words">
-        <AgentExecutionStatus />
+    <div className="flex w-full justify-start">
+      <div className={cn("chat-bubble", "chat-bubble-agent")}>
+        <div className="text-sm leading-6 break-words">
+          <AgentExecutionStatus />
+        </div>
       </div>
     </div>
   );
@@ -181,6 +171,8 @@ function Message({ chat }: { chat: Chat }) {
 
   // 获取该消息关联的 MCP 工具调用
   const mcpToolCalls = getMcpToolCallsByChatId(chat.id);
+  const linkedFiles = parseJsonArray<LinkedFileRef>(chat.linkedFiles);
+  const linkedSnippets = parseJsonArray<LinkedSnippetRef>(chat.linkedSnippets);
 
   // 如果是空内容的 AI 消息且 Agent 正在运行，不显示（避免双头像）
   if (chat.role === "system" && !chat.content && agentState.isRunning) {
@@ -237,6 +229,41 @@ function Message({ chat }: { chat: Chat }) {
       return (
         <MessageWrapper chat={chat}>
           <div className="w-full">
+            {chat.role === "user" &&
+              (linkedFiles.length > 0 || linkedSnippets.length > 0) && (
+                <div className="mb-2 flex flex-wrap gap-1">
+                  {linkedFiles.map((f) => {
+                    const label = f.relativePath || f.name || f.path;
+                    return (
+                      <span
+                        key={`file:${f.path}`}
+                        className="chat-file-mention"
+                        title={f.path}
+                      >
+                        @{label}
+                      </span>
+                    );
+                  })}
+                  {linkedSnippets.map((s, idx) => {
+                    const name = (s.filePath.split("/").pop() || s.filePath).trim();
+                    const snippet = (s.snippet || "").trim();
+                    const clip =
+                      snippet.length > 240
+                        ? `${snippet.slice(0, 240)}…`
+                        : snippet || s.filePath;
+                    return (
+                      <span
+                        key={`snippet:${idx}:${s.filePath}`}
+                        className="chat-file-mention chat-snippet-mention"
+                        title={clip}
+                      >
+                        @选区:{name}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+
             {/* Agent 执行历史 - 显示保存的历史记录 */}
             {chat.role === "system" && chat.agentHistory && (
               <AgentHistory historyJson={chat.agentHistory} />

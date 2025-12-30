@@ -21,7 +21,8 @@
 .markdown-body {
   box-sizing: border-box;
   width: 100%;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
+    sans-serif;
   font-size: 16px;
   line-height: 1.6;
   @apply bg-white dark:bg-zinc-950 text-foreground mb-2;
@@ -159,7 +160,8 @@ pre.hljs {
   background: rgba(0, 0, 0, 0.04);
   overflow: auto;
   max-height: 260px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
   font-size: 12px;
   line-height: 1.45;
 }
@@ -228,4 +230,20 @@ pre.hljs {
 
 .chat-snippet-mention {
   @apply bg-primary/10 border-primary/20;
+}
+
+/* Chat message bubbles */
+.chat-bubble {
+  width: fit-content;
+  max-width: min(720px, 100%);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.chat-bubble-user {
+  @apply border border-border bg-background;
+}
+
+.chat-bubble-agent {
+  @apply bg-background;
 }

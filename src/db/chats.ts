@@ -16,6 +16,8 @@ export interface Chat {
   createdAt: number
   ragSources?: string // RAG引用的文件名，JSON字符串数组
   agentHistory?: string // Agent执行历史，JSON字符串
+  linkedFiles?: string // @ 引用的文件（JSON 字符串）
+  linkedSnippets?: string // @ 引用的选区（JSON 字符串）
 }
 
 // 创建 chats 表
@@ -32,7 +34,9 @@ export async function initChatsDb() {
       inserted boolean default false,
       createdAt integer not null,
       ragSources text default null,
-      agentHistory text default null
+      agentHistory text default null,
+      linkedFiles text default null,
+      linkedSnippets text default null
     )
   `)
 
@@ -54,6 +58,24 @@ export async function initChatsDb() {
   } catch {
     // 如果列已存在，忽略错误
   }
+
+  // 迁移：为现有表添加 linkedFiles 列（如果不存在）
+  try {
+    await db.execute(`
+      alter table chats add column linkedFiles text default null
+    `)
+  } catch {
+    // ignore
+  }
+
+  // 迁移：为现有表添加 linkedSnippets 列（如果不存在）
+  try {
+    await db.execute(`
+      alter table chats add column linkedSnippets text default null
+    `)
+  } catch {
+    // ignore
+  }
 }
 
 // 插入一条 chat
@@ -62,8 +84,8 @@ export async function insertChat(chat: Omit<Chat, 'id' | 'createdAt' | 'tagId'> 
   const createdAt = Date.now()
   const tagId = chat.tagId ?? DEFAULT_CHAT_TAG_ID
   return await db.execute(
-    "insert into chats (tagId, content, role, type, image, inserted, createdAt, ragSources, agentHistory) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
-    [tagId, chat.content, chat.role, chat.type, chat.image, chat.inserted ? 1 : 0, createdAt, chat.ragSources, chat.agentHistory]
+    "insert into chats (tagId, content, role, type, image, inserted, createdAt, ragSources, agentHistory, linkedFiles, linkedSnippets) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+    [tagId, chat.content, chat.role, chat.type, chat.image, chat.inserted ? 1 : 0, createdAt, chat.ragSources, chat.agentHistory, chat.linkedFiles, chat.linkedSnippets]
   )
 }
 
@@ -92,8 +114,8 @@ export async function insertChats(chats: Chat[]) {
   const db = await getDb()
   for (const chat of chats) {
     await db.execute(
-      "insert into chats (tagId, content, role, type, image, inserted, createdAt, ragSources) values ($1, $2, $3, $4, $5, $6, $7, $8)",
-      [chat.tagId, chat.content, chat.role, chat.type, chat.image, chat.inserted ? 1 : 0, chat.createdAt, chat.ragSources]
+      "insert into chats (tagId, content, role, type, image, inserted, createdAt, ragSources, agentHistory, linkedFiles, linkedSnippets) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+      [chat.tagId, chat.content, chat.role, chat.type, chat.image, chat.inserted ? 1 : 0, chat.createdAt, chat.ragSources, chat.agentHistory, chat.linkedFiles, chat.linkedSnippets]
     )
   }
 }
@@ -111,8 +133,8 @@ export async function deleteAllChats() {
 export async function updateChat(chat: Chat) {
   const db = await getDb()
   return await db.execute(
-    "update chats set content = $1, role = $2, type = $3, image = $4, inserted = $5, ragSources = $6, agentHistory = $7 where id = $8",
-    [chat.content, chat.role, chat.type, chat.image, chat.inserted ? 1 : 0, chat.ragSources, chat.agentHistory, chat.id]
+    "update chats set content = $1, role = $2, type = $3, image = $4, inserted = $5, ragSources = $6, agentHistory = $7, linkedFiles = $8, linkedSnippets = $9 where id = $10",
+    [chat.content, chat.role, chat.type, chat.image, chat.inserted ? 1 : 0, chat.ragSources, chat.agentHistory, chat.linkedFiles, chat.linkedSnippets, chat.id]
   )
 }
 

@@ -37,25 +37,23 @@ Input is a JSON object string with fields:
     "active_file_path": string | null,
     "active_content": string | null,
     "agent_context": string | null,
-    "selected_snippets": [{"file_path": string, "snippet": string}] | null
+    "selected_snippets": [{"file_path": string, "snippet": string}] | null,
+    "allowed_tools": [string] | null,
+    "tool_docs": [{"name": string, "description": string, "args": object, "dangerous": boolean}] | null
   }
 }
 
-Available tools (task field):
-- list_files: args { workspace_root, query?, limit? }
-- read_file: args { file_path, workspace_root?, max_chars?, allow_outside_workspace? }
-- generate_text: args { prompt, system?, model?, temperature? }
-- diff_preview: args { old_content, new_content, fromfile?, tofile?, context_lines? }
-- verify_contains: args { content, must_include, must_not_include?, case_sensitive? }
-- replace_lines: args { file_path, start_line, end_line, content, verify? }
-- replace_snippet: args { file_path, old_text, new_text, workspace_root?, occurrence?, verify? }
-- apply_patch: args { file_path, patch, verify? }
-- write_file: args { file_path, content, workspace_root?, allow_empty?, verify? }
+Tools:
+- You MUST use ONLY tools listed in context.allowed_tools.
+- Tool schemas/descriptions are provided in context.tool_docs (do not invent params).
 
 Rules:
 - If active_file_path exists, use it as default target.
 - If message clearly names a file path, use that as target.
 - Always include verify=true for write_file.
+- Dependencies MUST be complete:
+  - If any args contains "<GENERATED>-N" or "$step_N.", then N MUST be listed in the task's dep.
+  - Never reference a step that is not in dep.
 - If context.selected_snippets is provided and the user asks to rewrite/polish/translate "this paragraph/snippet", you MUST only modify that snippet:
   - Use generate_text to produce the rewritten snippet ONLY (not the whole file).
   - Then use replace_snippet to replace old_text with new_text in the target file.
@@ -101,6 +99,8 @@ def build_editor_planner_input(
     active_content: str | None,
     agent_context: str | None = None,
     selected_snippets: list[dict] | None = None,
+    allowed_tools: list[str] | None = None,
+    tool_docs: list[dict] | None = None,
 ) -> str:
     payload = {
         "session_id": session_id,
@@ -111,6 +111,8 @@ def build_editor_planner_input(
             "active_content": active_content,
             "agent_context": agent_context,
             "selected_snippets": selected_snippets,
+            "allowed_tools": allowed_tools,
+            "tool_docs": tool_docs,
         },
     }
     return json.dumps(payload, ensure_ascii=False)

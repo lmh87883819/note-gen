@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 import asyncio
 import logging
+import re
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -50,11 +51,13 @@ if __package__ in (None, ""):
 from backend.agents import build_domain_agents, get_router_agent
 from backend.agents import get_guard_agent
 from backend.agents.editor_planner import build_editor_planner_input, get_editor_planner_agent
+from backend.agents.editor_tool_router import build_editor_router_input, get_editor_tool_router_agent
 from backend.data_types import RunResult, SessionMemory, TaskPlan
 from backend.executor import ToolPlanExecutor
 from backend.memory import MemoryStore
 from backend.orchestrator import Orchestrator
 from backend.tools import build_tools
+from backend.tools.specs import build_tool_docs
 app = FastAPI(title="My Designer Agent Backend", version="0.1.0")
 
 logger = logging.getLogger("backend")
@@ -114,7 +117,53 @@ planner = None
 memory_store = MemoryStore()
 orchestrator = None
 editor_planner = None
+editor_tool_router = None
 pending_confirms: dict[tuple[str, str, int], asyncio.Future[bool]] = {}
+
+_GEN_TOKEN_RE = re.compile(r"<GENERATED>-(\d+)(?:-([a-zA-Z0-9_]+))?")
+_STEP_REF_RE = re.compile(r"\$step_(\d+)\.")
+
+
+def _collect_step_refs(value) -> set[int]:
+    refs: set[int] = set()
+    if isinstance(value, str):
+        for m in _GEN_TOKEN_RE.finditer(value):
+            try:
+                refs.add(int(m.group(1)))
+            except Exception:
+                pass
+        for m in _STEP_REF_RE.finditer(value):
+            try:
+                refs.add(int(m.group(1)))
+            except Exception:
+                pass
+        return refs
+    if isinstance(value, list):
+        for v in value:
+            refs |= _collect_step_refs(v)
+        return refs
+    if isinstance(value, dict):
+        for v in value.values():
+            refs |= _collect_step_refs(v)
+        return refs
+    return refs
+
+
+def _normalize_plan_deps(plan: TaskPlan) -> TaskPlan:
+    # Ensure any referenced step id is listed in dep so executor can resolve <GENERATED>-N reliably.
+    for t in plan.root:
+        refs = _collect_step_refs(t.args)
+        if not refs:
+            continue
+        # Remove self and future refs (best-effort; plan ids are 1..n)
+        refs = {r for r in refs if isinstance(r, int) and r > 0 and r != t.id}
+        if not refs:
+            continue
+        existing = set(t.dep or [])
+        missing = sorted(refs - existing)
+        if missing:
+            t.dep = sorted(existing | set(missing))
+    return plan
 
 
 def get_planner():
@@ -130,6 +179,12 @@ def get_editor_planner():
         editor_planner = get_editor_planner_agent()
     return editor_planner
 
+
+def get_editor_tool_router():
+    global editor_tool_router
+    if editor_tool_router is None:
+        editor_tool_router = get_editor_tool_router_agent()
+    return editor_tool_router
 
 def get_orchestrator() -> Orchestrator:
     global orchestrator
@@ -314,6 +369,28 @@ async def editor_run_stream(request: EditorRunRequest) -> StreamingResponse:
                     except Exception:
                         pass
                 logger.info("editor planner input: active_file_path=%s", active_file_path)
+
+                # Stage 1: tool routing (shrink tool set for stability when tools grow).
+                allowed_tool_names = None
+                try:
+                    router_input = build_editor_router_input(
+                        message=request.message,
+                        workspace_root=request.workspace_root,
+                        active_file_path=active_file_path,
+                        active_content=request.active_content,
+                        selected_snippets=request.selected_snippets,
+                    )
+                    router_out = await asyncio.to_thread(get_editor_tool_router().run, router_input)
+                    route = getattr(router_out, "content", None)
+                    if hasattr(route, "tools"):
+                        allowed_tool_names = list(route.tools)  # ToolName values
+                except Exception:
+                    allowed_tool_names = None
+
+                if not allowed_tool_names:
+                    # Fallback: allow all registered tools.
+                    allowed_tool_names = list(build_tools().keys())
+
                 planner_input = build_editor_planner_input(
                     session_id=request.session_id,
                     message=request.message,
@@ -322,6 +399,8 @@ async def editor_run_stream(request: EditorRunRequest) -> StreamingResponse:
                     active_content=request.active_content,
                     agent_context=request.agent_context,
                     selected_snippets=request.selected_snippets,
+                    allowed_tools=[t.value if hasattr(t, "value") else str(t) for t in allowed_tool_names],
+                    tool_docs=build_tool_docs(allowed_tool_names),
                 )
                 planner_out = await asyncio.to_thread(get_editor_planner().run, planner_input)
                 content = getattr(planner_out, "content", None)
@@ -351,10 +430,13 @@ async def editor_run_stream(request: EditorRunRequest) -> StreamingResponse:
                 else:
                     raise RuntimeError(f"Invalid editor planner output: {content!r}")
 
+            # Normalize deps (models may forget to include dep ids even though they reference <GENERATED>-N).
+            plan = _normalize_plan_deps(plan)
+
             yield f"data: {json.dumps({'type': 'plan', 'run_id': run_id, 'plan': plan.model_dump(mode='json')}, ensure_ascii=False)}\n\n"
             logger.info("editor plan steps=%s", len(plan.root))
 
-            executor = ToolPlanExecutor(tools=build_tools(), memory=memory_store)
+            executor = ToolPlanExecutor(tools=build_tools(), memory=memory_store, default_workspace_root=request.workspace_root)
 
             q: "asyncio.Queue[str | None]" = asyncio.Queue()
 

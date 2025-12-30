@@ -71,7 +71,7 @@ function buildRunSummaryFromResultZh(result: any): string {
     }
   }
   const lines: string[] = []
-  lines.push('结论')
+  lines.push('结论（Finished working）')
   const failed = steps.find((s: any) => s?.status === 'failed')
   if (failed) {
     lines.push(`任务失败：${failed?.error || 'unknown error'}`)
@@ -87,6 +87,42 @@ function buildRunSummaryFromResultZh(result: any): string {
     const filePath = out?.meta?.file_path || out?.meta?.filePath || s?.output?.asset_uri || ''
     const fileName = typeof filePath === 'string' ? filePath.split(/[\\/]/).pop() : ''
     lines.push(`- ${tool}: ${status}${fileName ? ` (${fileName})` : ''}`)
+  }
+
+  // Human-friendly result summary (avoid "only tool names" UX)
+  const lastCompleted = [...steps].reverse().find((s: any) => s?.status === 'completed')
+  if (lastCompleted) {
+    const task = String(lastCompleted?.task || '')
+    if (task === 'list_files') {
+      const raw = String(lastCompleted?.output?.data?.content ?? '')
+      try {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed)) {
+          const files = parsed.map((x) => String(x)).filter(Boolean)
+          lines.push('')
+          lines.push(`结果：共 ${files.length} 个文件`)
+          const max = 30
+          for (const f of files.slice(0, max)) lines.push(`- ${f}`)
+          if (files.length > max) lines.push(`- ... 还有 ${files.length - max} 个未展示`)
+        }
+      } catch {
+        // ignore
+      }
+    } else if (task === 'read_file') {
+      const out = lastCompleted?.output?.data?.tool_result
+      const filePath = out?.meta?.file_path || out?.meta?.filePath || lastCompleted?.output?.asset_uri || ''
+      const fileName = typeof filePath === 'string' ? filePath.split(/[\\/]/).pop() : ''
+      if (fileName) {
+        lines.push('')
+        lines.push(`结果：已读取 ${fileName}`)
+      }
+    } else if (task === 'write_file' || task === 'replace_snippet' || task === 'replace_lines' || task === 'apply_patch') {
+      const out = lastCompleted?.output?.data?.tool_result
+      const filePath = out?.meta?.file_path || out?.meta?.filePath || lastCompleted?.output?.asset_uri || ''
+      const fileName = typeof filePath === 'string' ? filePath.split(/[\\/]/).pop() : ''
+      lines.push('')
+      lines.push(`结果：已更新文件${fileName ? `（${fileName}）` : ''}`)
+    }
   }
 
   const diffStep = steps.find((s: any) => String(s?.task || '') === 'diff_preview' && s?.status === 'completed')

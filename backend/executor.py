@@ -82,10 +82,12 @@ class ToolPlanExecutor:
         *,
         tools: Dict[ToolName, Function],
         memory: MemoryStore,
+        default_workspace_root: Optional[str] = None,
         config: Optional[ExecutorConfig] = None,
     ) -> None:
         self._tools = tools
         self._memory = memory
+        self._default_workspace_root = default_workspace_root
         self._config = config or ExecutorConfig(
             max_retries=int(os.getenv("EXECUTOR_MAX_RETRIES", "2")),
             retry_backoff_s=float(os.getenv("EXECUTOR_RETRY_BACKOFF_S", "0.5")),
@@ -261,6 +263,19 @@ class ToolPlanExecutor:
                     allowed_dep_ids=set(t.dep),
                     step_results=step_results,
                 )
+
+                # Ensure workspace_root is always available for filesystem tools to avoid resolving relative paths
+                # against the server CWD (which may be the repo root or backend/).
+                if self._default_workspace_root and isinstance(resolved_args, dict):
+                    if t.task in {
+                        ToolName.LIST_FILES,
+                        ToolName.READ_FILE,
+                        ToolName.WRITE_FILE,
+                        ToolName.REPLACE_LINES,
+                        ToolName.REPLACE_SNIPPET,
+                        ToolName.APPLY_PATCH,
+                    } and "workspace_root" not in resolved_args:
+                        resolved_args = {**resolved_args, "workspace_root": self._default_workspace_root}
 
                 # Human-in-the-loop confirmation for destructive steps
                 if confirm is not None and t.task in CONFIRM_TASKS:

@@ -63,6 +63,13 @@ function buildRunSummaryFromResult(result: any): string {
 
 function buildRunSummaryFromResultZh(result: any): string {
   const steps = Array.isArray(result?.steps) ? result.steps : []
+  const planSteps = Array.isArray(result?.plan?.root) ? result.plan.root : Array.isArray(result?.plan) ? result.plan : []
+  const labelById = new Map<number, string>()
+  for (const p of planSteps) {
+    if (typeof p?.id === 'number' && typeof p?.label === 'string' && p.label.trim()) {
+      labelById.set(p.id, p.label.trim())
+    }
+  }
   const lines: string[] = []
   lines.push('结论')
   const failed = steps.find((s: any) => s?.status === 'failed')
@@ -74,13 +81,53 @@ function buildRunSummaryFromResultZh(result: any): string {
   lines.push('')
   lines.push('执行概览')
   for (const s of steps) {
-    const tool = String(s?.task || '')
+    const tool = String(labelById.get(Number(s?.id)) || s?.task || '')
     const status = String(s?.status || '')
     const out = s?.output?.data?.tool_result
     const filePath = out?.meta?.file_path || out?.meta?.filePath || s?.output?.asset_uri || ''
     const fileName = typeof filePath === 'string' ? filePath.split(/[\\/]/).pop() : ''
     lines.push(`- ${tool}: ${status}${fileName ? ` (${fileName})` : ''}`)
   }
+
+  const diffStep = steps.find((s: any) => String(s?.task || '') === 'diff_preview' && s?.status === 'completed')
+  const diff =
+    diffStep?.output?.data?.content ??
+    diffStep?.output?.data?.tool_result?.results?.[0]?.content ??
+    ''
+  const diffText = typeof diff === 'string' ? diff : ''
+  if (diffText.trim()) {
+    const MAX = 6000
+    const clipped = diffText.length > MAX
+      ? `${diffText.slice(0, MAX)}\n\n[...已截断 ${diffText.length - MAX} 字符...]`
+      : diffText
+
+    const esc = (s: string) =>
+      s
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+
+    const rows = clipped.split('\n').map((line) => {
+      const first = line.slice(0, 1)
+      const cls =
+        first === '+' ? 'agent-diff-line agent-diff-plus' :
+        first === '-' ? 'agent-diff-line agent-diff-minus' :
+        line.startsWith('@@') ? 'agent-diff-line agent-diff-hunk' :
+        line.startsWith('+++') || line.startsWith('---') ? 'agent-diff-line agent-diff-header' :
+        'agent-diff-line'
+      const safe = esc(line.length ? line : ' ')
+      return `<div class="${cls}">${safe}</div>`
+    }).join('')
+
+    lines.push('')
+    lines.push('<details class="agent-diff-details">')
+    lines.push('<summary>变更预览（Diff）</summary>')
+    lines.push(`<div class="agent-diff-box">${rows}</div>`)
+    lines.push('</details>')
+  }
+
   return lines.join('\n')
 }
 
@@ -138,7 +185,7 @@ export class BackendAgentHandler {
     store.setAgentState({ phase: 'stopped', isRunning: false })
   }
 
-  async execute(userInput: string) {
+  async execute(userInput: string, opts?: { agentContext?: string; selectedSnippets?: Array<{ filePath: string; snippet: string }> }) {
     const chatStore = useChatStore.getState()
     const articleStore = useArticleStore.getState()
 
@@ -190,6 +237,8 @@ export class BackendAgentHandler {
           workspace_root: workspaceRoot,
           active_file_path: activeAbsPath,
           active_content: activeContent,
+          agent_context: opts?.agentContext || null,
+          selected_snippets: (opts?.selectedSnippets || []).map(s => ({ file_path: s.filePath, snippet: s.snippet })),
         }),
         signal,
       })
@@ -229,6 +278,8 @@ export class BackendAgentHandler {
             chatStore.setAgentState({
               phase: 'executing',
               plan: plan.map((s: any) => {
+                const label = String(s?.label || '').trim()
+                if (label) return label
                 const task = String(s?.task || '')
                 const file = s?.args?.file_path ? String(s.args.file_path).split(/[\\/]/).pop() : ''
                 return file ? `${task}: ${file}` : task
@@ -242,6 +293,7 @@ export class BackendAgentHandler {
               chatStore.addAgentToolCall({
                 id: `${sessionId}:${backendRunId || ''}:${step.id}`,
                 toolName: String(step.task || ''),
+                label: String(step.label || ''),
                 params: step.args || {},
                 status: 'pending',
                 timestamp: Date.now(),
@@ -283,6 +335,7 @@ export class BackendAgentHandler {
 
           chatStore.updateAgentToolCall(callId, {
             toolName: String((ev as any).task || plan?.task || ''),
+            label: String(plan?.label || ''),
             params: plan?.args || {},
             status: mappedStatus as any,
             result: status === 'completed'
@@ -308,20 +361,14 @@ export class BackendAgentHandler {
               out?.asset_uri ||
               ''
 
-            if (task === 'write_file' && matchesActive(outPath)) {
+            const mutating = task === 'write_file' || task === 'replace_snippet' || task === 'replace_lines' || task === 'apply_patch'
+            if (mutating && matchesActive(outPath) && activeFilePath) {
               needsRefreshAfterWrite = true
-              if (activeFilePath) {
-                void useArticleStore.getState().readArticle(activeFilePath)
-              }
+              void useArticleStore.getState().readArticle(activeFilePath)
             }
 
+            // Optional follow-up read_file step: clear the flag when we see it (but we already refreshed from disk).
             if (task === 'read_file' && matchesActive(outPath) && needsRefreshAfterWrite) {
-              const content = String(out?.data?.content ?? toolResult?.results?.[0]?.content ?? '')
-              if (activeFilePath && content) {
-                useArticleStore.getState().setCurrentArticle(content)
-              } else if (activeFilePath) {
-                void useArticleStore.getState().readArticle(activeFilePath)
-              }
               needsRefreshAfterWrite = false
             }
           }

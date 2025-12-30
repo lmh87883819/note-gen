@@ -27,7 +27,7 @@ from .memory import MemoryStore
 EventEmitter = Callable[[Dict[str, Any]], Awaitable[None]]
 ConfirmCallback = Callable[[PlannedTask, Dict[str, Any]], Awaitable[bool]]
 
-CONFIRM_TASKS: Set[ToolName] = {ToolName.WRITE_FILE, ToolName.APPLY_PATCH, ToolName.REPLACE_LINES}
+CONFIRM_TASKS: Set[ToolName] = {ToolName.WRITE_FILE, ToolName.APPLY_PATCH, ToolName.REPLACE_LINES, ToolName.REPLACE_SNIPPET}
 
 _REF_RE = re.compile(r"^\$step_(\d+)\.(.+)$")
 _GEN_RE = re.compile(r"^<GENERATED>-(\d+)(?:-(.+))?$")

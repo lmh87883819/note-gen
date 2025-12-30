@@ -123,7 +123,7 @@ export function AgentHistory({ historyJson }: AgentHistoryProps) {
                 >
                   {statusIcon}
                   <code className="text-xs text-muted-foreground flex-1 break-words font-mono">
-                    {call.toolName}
+                    {(call as any).label || call.toolName}
                   </code>
                   <ChevronRight className={`size-3.5 text-muted-foreground transition-transform ${expanded ? 'rotate-90' : ''}`} />
                 </div>

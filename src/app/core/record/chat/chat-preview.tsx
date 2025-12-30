@@ -15,7 +15,7 @@ import './chat.scss';
 
 type ThemeType = 'light' | 'dark' | 'system';
 
-export default function ChatPreview({text}: {text: string, themeReverse?: boolean}) {
+function ChatPreviewImpl({text}: {text: string, themeReverse?: boolean}) {
   const previewRef = useRef<HTMLDivElement>(null);
   const { theme } = useTheme()
   const [mdTheme, setMdTheme] = useState<ThemeType>('light')
@@ -195,3 +195,6 @@ export default function ChatPreview({text}: {text: string, themeReverse?: boolea
     </div>
   );
 }
+
+const ChatPreview = React.memo(ChatPreviewImpl)
+export default ChatPreview

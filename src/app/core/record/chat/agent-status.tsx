@@ -92,7 +92,7 @@ export function AgentStatus() {
                             <XCircle className="size-3 text-red-500" />
                           )}
                           <Badge variant="outline" className="text-xs">
-                            {call.toolName}
+                            {(call as any).label || call.toolName}
                           </Badge>
                           {call.result?.message && (
                             <span className="text-muted-foreground truncate">

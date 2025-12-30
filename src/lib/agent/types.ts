@@ -27,6 +27,7 @@ export interface ToolResult {
 export interface ToolCall {
   id: string
   toolName: string
+  label?: string
   params: Record<string, any>
   result?: ToolResult
   status: 'pending' | 'running' | 'success' | 'error'

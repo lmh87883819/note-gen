@@ -3,10 +3,34 @@ import { Loader2, ChevronRight, Brain, CheckCircle, XCircle, Clock } from "lucid
 import useChatStore from "@/stores/chat"
 import { Button } from "@/components/ui/button"
 
+function extractToolContent(call: any): string {
+  const data = call?.result?.data
+  const content =
+    data?.data?.content ??
+    data?.data?.tool_result?.results?.[0]?.content ??
+    ''
+  return typeof content === 'string' ? content : ''
+}
+
+function extractToolMeta(call: any): any {
+  const data = call?.result?.data
+  return data?.data?.tool_result?.results?.[0]?.meta ?? {}
+}
+
+function getDiffLineClass(line: string): string {
+  const first = line.slice(0, 1)
+  if (first === '+') return 'agent-diff-line agent-diff-plus'
+  if (first === '-') return 'agent-diff-line agent-diff-minus'
+  if (line.startsWith('@@')) return 'agent-diff-line agent-diff-hunk'
+  if (line.startsWith('+++') || line.startsWith('---')) return 'agent-diff-line agent-diff-header'
+  return 'agent-diff-line'
+}
+
 export function AgentExecutionStatus() {
   const { agentState, resolveAgentConfirmation } = useChatStore()
   const [isThoughtExpanded, setIsThoughtExpanded] = React.useState(false)
   const [expandedToolCalls, setExpandedToolCalls] = React.useState<Set<string>>(new Set())
+  const [expandedRaw, setExpandedRaw] = React.useState<Set<string>>(new Set())
 
   // 只在 Agent 运行时显示
   if (!agentState.isRunning) {
@@ -18,6 +42,13 @@ export function AgentExecutionStatus() {
     if (next.has(id)) next.delete(id)
     else next.add(id)
     setExpandedToolCalls(next)
+  }
+
+  const toggleRawExpand = (id: string) => {
+    const next = new Set(expandedRaw)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    setExpandedRaw(next)
   }
 
   // 提取思考内容的标题（第一行或前 50 个字符）
@@ -147,6 +178,7 @@ export function AgentExecutionStatus() {
         <div className="pt-1">
           {agentState.toolCalls.map((call) => {
             const expanded = expandedToolCalls.has(call.id)
+            const showRaw = expandedRaw.has(call.id)
             const statusIcon =
               call.status === 'success' ? <CheckCircle className="size-3.5 text-green-500 flex-shrink-0" /> :
               call.status === 'error' ? <XCircle className="size-3.5 text-red-500 flex-shrink-0" /> :
@@ -161,14 +193,55 @@ export function AgentExecutionStatus() {
                 >
                   {statusIcon}
                   <code className="text-xs text-muted-foreground flex-1 break-words font-mono">
-                    {call.toolName}
+                    {(call as any).label || call.toolName}
                   </code>
                   <ChevronRight className={`size-3.5 text-muted-foreground transition-transform ${expanded ? 'rotate-90' : ''}`} />
                 </div>
                 {expanded && (
-                  <div className="pl-6 pr-3 pb-2 text-xs text-muted-foreground whitespace-pre-wrap">
-                    <div>Params: {JSON.stringify(call.params, null, 2)}</div>
-                    {call.result && <div className="mt-2">Result: {JSON.stringify(call.result, null, 2)}</div>}
+                  <div className="pl-6 pr-3 pb-2 text-xs text-muted-foreground">
+                    {call?.result?.success && call.toolName === 'diff_preview' && (
+                      <div className="mt-2">
+                        <div className="font-medium text-xs mb-1 text-foreground/80">Diff</div>
+                        <div className="agent-diff-box">
+                          {(extractToolContent(call) || '(no diff)').split('\n').map((line, idx) => (
+                            <div key={idx} className={getDiffLineClass(line)}>
+                              {line || ' '}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {call?.result?.success && call.toolName === 'replace_snippet' && (
+                      <div className="mt-2">
+                        <div className="font-medium text-xs mb-1 text-foreground/80">Snippet Change</div>
+                        <pre className="text-xs p-2 rounded bg-muted/60 overflow-auto max-h-64 whitespace-pre font-mono">
+                          {(() => {
+                            const m = extractToolMeta(call) || {}
+                            const before = String(m.before_preview || '')
+                            const after = String(m.after_preview || '')
+                            if (!before && !after) return '(no preview)'
+                            return `--- before\\n${before}\\n\\n+++ after\\n${after}`
+                          })()}
+                        </pre>
+                      </div>
+                    )}
+
+                    <div className="mt-2 flex items-center gap-2">
+                      <button
+                        className="text-xs underline text-muted-foreground hover:text-foreground/80"
+                        onClick={(e) => { e.stopPropagation(); toggleRawExpand(call.id) }}
+                        type="button"
+                      >
+                        {showRaw ? '隐藏详情' : '显示详情'}
+                      </button>
+                    </div>
+
+                    {showRaw && (
+                      <div className="mt-2 whitespace-pre-wrap">
+                        <div>Params: {JSON.stringify(call.params, null, 2)}</div>
+                        {call.result && <div className="mt-2">Result: {JSON.stringify(call.result, null, 2)}</div>}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

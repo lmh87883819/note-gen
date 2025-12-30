@@ -123,7 +123,7 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
     agentHandlerRef.current = agentHandler
 
     try {
-      await agentHandler.execute(userInput)
+      await agentHandler.execute(userInput, { agentContext, selectedSnippets: linkedSnippets })
     } catch (error) {
       console.error('Agent execution error:', error)
     } finally {

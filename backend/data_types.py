@@ -22,6 +22,7 @@ class ToolName(str, Enum):
     VERIFY_CONTAINS = "verify_contains"  # 验证内容包含（断言）
     REPLACE_LINES = "replace_lines"  # 按行替换（精确编辑）
     APPLY_PATCH = "apply_patch"  # 应用 unified diff patch
+    REPLACE_SNIPPET = "replace_snippet"  # 替换选中片段（按文本匹配）
 
 
 # 2. JARVIS 风格任务规划结构（parse_task 输出）
@@ -32,6 +33,7 @@ class PlannedTask(BaseModel):
     id: int = Field(..., ge=1, description="任务 id（从 1 开始）")
     dep: List[int] = Field(default_factory=list, description="依赖任务 id 列表")
     args: Dict[str, Any] = Field(default_factory=dict, description="任务参数字典")
+    label: Optional[str] = Field(default=None, description="可选：用于 UI 展示的任务说明（不会传给工具）")
 
 
 class TaskPlan(RootModel[List[PlannedTask]]):

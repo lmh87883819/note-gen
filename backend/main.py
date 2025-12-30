@@ -98,6 +98,8 @@ class EditorRunRequest(BaseModel):
     workspace_root: str | None = None
     active_file_path: str | None = None
     active_content: str | None = None
+    agent_context: str | None = None
+    selected_snippets: list[dict] | None = None
     plan: TaskPlan | None = None
 
 
@@ -318,6 +320,8 @@ async def editor_run_stream(request: EditorRunRequest) -> StreamingResponse:
                     workspace_root=request.workspace_root,
                     active_file_path=active_file_path,
                     active_content=request.active_content,
+                    agent_context=request.agent_context,
+                    selected_snippets=request.selected_snippets,
                 )
                 planner_out = await asyncio.to_thread(get_editor_planner().run, planner_input)
                 content = getattr(planner_out, "content", None)

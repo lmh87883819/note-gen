@@ -132,7 +132,7 @@ function MessageWrapper({
           )}
         </div>
       )}
-      <div className="text-xs leading-6 flex-1 break-words">{children}</div>
+      <div className="text-[12px] leading-6 flex-1 break-words">{children}</div>
     </div>
   );
 }

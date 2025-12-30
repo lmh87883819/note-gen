@@ -36,7 +36,14 @@ export async function getFilePathOptions(relativePath: string): Promise<{ path: 
   const workspace = await getWorkspacePath()
   
   if (workspace.isCustom) {
-    // 对于自定义工作区，返回绝对路径，不设置baseDir
+    // 对于自定义工作区：如果已经是绝对路径则直接使用；否则基于工作区拼接
+    const isAbsolute =
+      /^[a-zA-Z]:[\\/]/.test(relativePath) || // Windows drive path, e.g. C:\...
+      relativePath.startsWith('\\\\') || // UNC path, e.g. \\server\share
+      relativePath.startsWith('/') // POSIX absolute path
+
+    if (isAbsolute) return { path: relativePath }
+
     const fullPath = await join(workspace.path, relativePath)
     return { path: fullPath }
   } else {

@@ -123,3 +123,74 @@
 .vditor-panel{
   @apply shadow h-8 p-1 -translate-y-4;
 }
+
+/* Editor line numbers (markdown-line based) + highlights */
+.vditor.show-line-numbers {
+  --md-line-gutter-width: 3.5em;
+  --md-line-number-color: rgba(120, 120, 120, 0.7);
+  --md-line-number-bg: transparent;
+}
+
+.vditor--dark.show-line-numbers {
+  --md-line-number-color: rgba(200, 200, 200, 0.55);
+}
+
+.md-line-gutter {
+  display: none;
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--md-line-gutter-width);
+  user-select: none;
+  pointer-events: none;
+  background: var(--md-line-number-bg);
+  border-right: 1px solid rgba(120, 120, 120, 0.12);
+  overflow: hidden;
+  z-index: 2;
+}
+
+.md-line-gutter__inner {
+  white-space: pre;
+  font-size: 12px;
+  line-height: 1.5;
+  padding-top: 24px;
+  padding-bottom: 24px;
+  padding-right: 0.6em;
+  text-align: right;
+  color: var(--md-line-number-color);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.md-highlight-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 1;
+}
+
+.md-highlight-layer__inner {
+  position: absolute;
+  left: 0;
+  top: 0;
+  will-change: transform;
+}
+
+.md-highlight-rect {
+  position: absolute;
+  border-radius: 4px;
+}
+
+.vditor.show-line-numbers {
+  .md-line-gutter {
+    display: block;
+  }
+
+  .vditor-reset {
+    padding-left: calc(var(--md-line-gutter-width) + 0.75em) !important;
+  }
+}

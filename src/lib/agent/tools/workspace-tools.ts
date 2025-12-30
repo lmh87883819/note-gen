@@ -2,6 +2,7 @@ import { Tool, ToolResult } from '../types'
 import useArticleStore from '@/stores/article'
 import { getAllWorkspaceFiles } from '@/lib/files'
 import { getFilePathOptions, getWorkspacePath } from '@/lib/workspace'
+import emitter from '@/lib/emitter'
 import { readTextFile, writeTextFile, readFile } from '@tauri-apps/plugin-fs'
 
 export const getCurrentArticleTool: Tool = {
@@ -110,11 +111,79 @@ export const replaceCurrentArticleLinesTool: Tool = {
     const nextContent = nextLines.join('\n')
     store.setCurrentArticle(nextContent)
     await store.saveCurrentArticle(nextContent)
+    const workspace = await getWorkspacePath()
+    const resolved = await getFilePathOptions(activeFilePath)
+    let verifyLength: number | null = null
+    try {
+      const text = workspace.isCustom
+        ? await readTextFile(resolved.path)
+        : await readTextFile(resolved.path, { baseDir: resolved.baseDir })
+      verifyLength = text.length
+    } catch {}
+    try {
+      emitter.emit('editor-ai-applied', {
+        filePath: activeFilePath,
+        startLine: s,
+        endLine: e,
+        content: replacement,
+      })
+    } catch {}
 
     return {
       success: true,
-      data: { filePath: activeFilePath, startLine: s, endLine: e },
+      data: {
+        filePath: activeFilePath,
+        startLine: s,
+        endLine: e,
+        workspace,
+        resolvedPath: resolved.path,
+        verifyLength,
+      },
       message: `已替换 ${activeFilePath} 的第 ${s}-${e} 行`,
+    }
+  },
+}
+
+export const updateArticleTool: Tool = {
+  name: 'update_article',
+  description: '用完整内容覆盖当前正在编辑的文章（不需要 filePath）',
+  category: 'note',
+  requiresConfirmation: true,
+  parameters: [
+    { name: 'content', type: 'string', description: '要写入的新内容（完整文章）', required: true },
+  ],
+  execute: async (params): Promise<ToolResult> => {
+    const store = useArticleStore.getState()
+    const { activeFilePath } = store
+    if (!activeFilePath) return { success: false, error: '当前没有打开的文章文件' }
+
+    const content = String(params.content ?? '')
+    store.setCurrentArticle(content)
+    await store.saveCurrentArticle(content)
+
+    try {
+      emitter.emit('editor-ai-applied', {
+        filePath: activeFilePath,
+        startLine: 1,
+        endLine: Math.max(1, content.split('\n').length),
+        content,
+      })
+    } catch {}
+
+    const workspace = await getWorkspacePath()
+    const resolved = await getFilePathOptions(activeFilePath)
+    let verifyLength: number | null = null
+    try {
+      const text = workspace.isCustom
+        ? await readTextFile(resolved.path)
+        : await readTextFile(resolved.path, { baseDir: resolved.baseDir })
+      verifyLength = text.length
+    } catch {}
+
+    return {
+      success: true,
+      data: { filePath: activeFilePath, workspace, resolvedPath: resolved.path, verifyLength },
+      message: `已更新文章: ${activeFilePath}`,
     }
   },
 }
@@ -221,36 +290,67 @@ export const writeWorkspaceFileTool: Tool = {
   category: 'note',
   requiresConfirmation: true,
   parameters: [
-    { name: 'filePath', type: 'string', description: '相对路径（默认工作区）或绝对路径（自定义工作区）', required: true },
+    { name: 'filePath', type: 'string', description: '可选：相对路径（默认工作区）或绝对路径（自定义工作区）；不传则写入当前打开的文章', required: false },
     { name: 'content', type: 'string', description: '要写入的文本内容', required: true },
   ],
   execute: async (params): Promise<ToolResult> => {
-    const filePath = String(params.filePath || '')
-    if (!filePath) return { success: false, error: 'filePath 不能为空' }
+    const filePathFromParams = String(params.filePath || '').trim()
+    const filePath = filePathFromParams || useArticleStore.getState().activeFilePath || ''
+    if (!filePath) return { success: false, error: 'filePath 不能为空（且当前没有打开的文章可作为默认写入目标）' }
     const content = String(params.content ?? '')
 
     try {
       const workspace = await getWorkspacePath()
+      const resolved = await getFilePathOptions(filePath)
       if (workspace.isCustom) {
-        await writeTextFile(filePath, content)
+        await writeTextFile(resolved.path, content)
       } else {
-        const { path, baseDir } = await getFilePathOptions(filePath)
-        await writeTextFile(path, content, { baseDir })
+        await writeTextFile(resolved.path, content, { baseDir: resolved.baseDir })
       }
-      return { success: true, data: { filePath }, message: `已写入文件: ${filePath}` }
+
+      // 如果写入的是当前打开的文章，同步更新编辑器状态（否则会出现“写入成功但界面没变”）
+      const article = useArticleStore.getState()
+      if (article.activeFilePath && article.activeFilePath === filePath) {
+        article.setCurrentArticle(content)
+      }
+
+      let verifyLength: number | null = null
+      try {
+        const text = workspace.isCustom
+          ? await readTextFile(resolved.path)
+          : await readTextFile(resolved.path, { baseDir: resolved.baseDir })
+        verifyLength = text.length
+      } catch {}
+
+      return {
+        success: true,
+        data: { filePath, workspace, resolvedPath: resolved.path, verifyLength },
+        message: `已写入文件: ${filePath}`,
+      }
     } catch (error) {
       return { success: false, error: `写入文件失败: ${String(error)}` }
     }
   },
 }
 
+export const writeFileTool: Tool = {
+  name: 'write_file',
+  description: '写入（覆盖）工作区文本文件内容（write_workspace_file 的别名）',
+  category: 'note',
+  requiresConfirmation: true,
+  parameters: writeWorkspaceFileTool.parameters,
+  execute: writeWorkspaceFileTool.execute,
+}
+
 export const workspaceTools: Tool[] = [
   getCurrentArticleTool,
   findInCurrentArticleTool,
   replaceCurrentArticleLinesTool,
+  updateArticleTool,
   listWorkspaceFilesTool,
   readWorkspaceFileTool,
   writeWorkspaceFileTool,
+  writeFileTool,
 ]
 
 function escapeRegExp(s: string) {
@@ -266,4 +366,3 @@ function uint8ToBase64(bytes: Uint8Array): string {
   }
   return btoa(binary)
 }
-

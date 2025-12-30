@@ -540,6 +540,7 @@ export async function fetchAiStream(
     let fullContent = ''
     const toolCalls: any[] = []
     let hasToolCalls = false
+    let legacyFunctionCallId: string | null = null
     
     for await (const chunk of stream) {
       if (abortSignal?.aborted) {
@@ -580,6 +581,35 @@ export async function fetchAiStream(
           if (toolCall.function?.name) {
             toolCalls[index].function.name = toolCall.function.name
           }
+        }
+      }
+
+      // 兼容：一些 OpenAI 兼容服务端仍返回 legacy `function_call`（单个调用）而不是 `tool_calls`
+      const legacy = (delta as any)?.function_call
+      if (legacy) {
+        hasToolCalls = true
+        const index = 0
+        if (!legacyFunctionCallId) {
+          legacyFunctionCallId = `legacy-fc-${Date.now()}-${Math.random().toString(36).slice(2)}`
+        }
+
+        if (!toolCalls[index]) {
+          toolCalls[index] = {
+            id: legacyFunctionCallId,
+            type: 'function',
+            function: {
+              name: String(legacy?.name || ''),
+              arguments: ''
+            }
+          }
+        }
+
+        if (legacy?.name && !toolCalls[index].function.name) {
+          toolCalls[index].function.name = String(legacy.name)
+        }
+
+        if (legacy?.arguments) {
+          toolCalls[index].function.arguments += String(legacy.arguments)
         }
       }
       
@@ -765,6 +795,31 @@ export async function fetchAiStream(
               if (toolCall.function?.name) {
                 currentToolCalls[index].function.name = toolCall.function.name
               }
+            }
+          }
+
+          // 兼容：legacy `function_call`
+          const legacy = (delta as any)?.function_call
+          if (legacy) {
+            const index = 0
+            if (!legacyFunctionCallId) {
+              legacyFunctionCallId = `legacy-fc-${Date.now()}-${Math.random().toString(36).slice(2)}`
+            }
+            if (!currentToolCalls[index]) {
+              currentToolCalls[index] = {
+                id: legacyFunctionCallId,
+                type: 'function',
+                function: {
+                  name: String(legacy?.name || ''),
+                  arguments: ''
+                }
+              }
+            }
+            if (legacy?.name && !currentToolCalls[index].function.name) {
+              currentToolCalls[index].function.name = String(legacy.name)
+            }
+            if (legacy?.arguments) {
+              currentToolCalls[index].function.arguments += String(legacy.arguments)
             }
           }
           

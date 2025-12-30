@@ -175,6 +175,11 @@ export class ReActAgent {
       '- 最终回答请包含：结论/概要/下一步（用简洁的要点）。',
       '',
       '你可以通过函数调用（tool calls）来使用工具。',
+      '',
+      '兼容性要求（非常重要）：',
+      '- 如果当前模型/服务端不支持原生 tool calls，你必须在正文中输出一个 <tool_calls>...</tool_calls> 块，里面是 JSON 数组。',
+      '- <tool_calls> 块内每一项格式：{ "toolName": string, "params": object }',
+      '- 除 <tool_calls> 块外，可以正常输出中文说明；但不要声称“已写入/已更新”除非工具真实执行成功。',
     ].join('\n')
   }
 
@@ -255,6 +260,7 @@ export class ReActAgent {
     let fullContent = ''
     let thought = ''
     const toolCalls: OpenAIToolCall[] = []
+    let legacyFunctionCallId: string | null = null
 
     for await (const chunk of stream) {
       if (this.stopped) {
@@ -299,6 +305,31 @@ export class ReActAgent {
         }
       }
 
+      // 兼容：一些 OpenAI 兼容服务端仍返回 legacy `function_call`（单个调用）而不是 `tool_calls`
+      const legacy = (delta as any)?.function_call
+      if (legacy) {
+        const index = 0
+        if (!legacyFunctionCallId) {
+          legacyFunctionCallId = `legacy-fc-${Date.now()}-${Math.random().toString(36).slice(2)}`
+        }
+        if (!toolCalls[index]) {
+          toolCalls[index] = {
+            id: legacyFunctionCallId,
+            type: 'function',
+            function: {
+              name: String(legacy?.name || ''),
+              arguments: '',
+            },
+          }
+        }
+        if (legacy?.name && !toolCalls[index].function.name) {
+          toolCalls[index].function.name = String(legacy.name)
+        }
+        if (legacy?.arguments) {
+          toolCalls[index].function.arguments += String(legacy.arguments)
+        }
+      }
+
       // 只在模型提供 reasoning_content 时更新“思考”展示；不要用内容流填充思考区
       if (thought) {
         this.config.onThought?.(thought)
@@ -306,7 +337,120 @@ export class ReActAgent {
     }
 
     this.abortController = null
-    return { content: fullContent, thought, toolCalls: toolCalls.filter(Boolean) }
+    const { content: cleanedContent, extractedThought } = stripThinkBlocks(fullContent)
+    const mergedThought = [thought, extractedThought].filter(Boolean).join('\n\n')
+
+    const normalizedToolCalls = toolCalls.filter(Boolean)
+    if (normalizedToolCalls.length > 0) {
+      return { content: cleanedContent, thought: mergedThought, toolCalls: normalizedToolCalls }
+    }
+
+    // 兼容：从正文中解析 <tool_calls> JSON（适配不支持原生 tool call 的模型）
+    const parsedFromContent = parseToolCallsFromContent(cleanedContent)
+    if (parsedFromContent.length > 0) {
+      return { content: removeToolCallsBlock(cleanedContent), thought: mergedThought, toolCalls: parsedFromContent }
+    }
+
+    // 兜底：如果模型“口头说要写文件/用工具”但没发 tool calls，则再走一轮“结构化工具提取”
+    if (shouldSynthesizeToolCalls(cleanedContent)) {
+      const synthesized = await this.synthesizeToolCalls(openai, model, messages, cleanedContent, tools, temperature)
+      if (synthesized.length > 0) {
+        return { content: removeToolCallsBlock(cleanedContent), thought: mergedThought, toolCalls: synthesized }
+      }
+    }
+
+    return { content: cleanedContent, thought: mergedThought, toolCalls: [] }
+  }
+
+  private async synthesizeToolCalls(
+    openai: OpenAI,
+    model: string,
+    messages: any[],
+    assistantDraft: string,
+    tools: OpenAI.Chat.Completions.ChatCompletionTool[],
+    temperature?: number
+  ): Promise<OpenAIToolCall[]> {
+    if (this.stopped) return []
+
+    // 只暴露最常用/最安全的一小撮工具，避免模型乱选
+    const allow = new Set([
+      'get_current_article',
+      'read_workspace_file',
+      'list_workspace_files',
+      'replace_current_article_lines',
+      'update_article',
+      'write_workspace_file',
+      'write_file',
+    ])
+
+    const exposed = tools
+      .filter(t => t.type === 'function' && allow.has((t as any)?.function?.name))
+      .map(t => (t as any).function)
+
+    if (exposed.length === 0) return []
+
+    const lastUser = [...messages].reverse().find(m => m?.role === 'user')?.content
+
+    const prompt = [
+      '你是工具调用提取器。当前模型可能不支持原生 tool calls。',
+      '请基于用户请求与当前草稿，输出下一步应该执行的工具调用列表。',
+      '',
+      '输出要求：',
+      '- 只输出 JSON 数组，不要输出其它文本。',
+      '- 每一项格式：{ "toolName": string, "params": object }',
+      '- 只能从“可用工具”里选择 toolName。',
+      '- 不要编造“已写入/已更新”，这里只负责生成要调用的工具。',
+      '',
+      `用户请求：${typeof lastUser === 'string' ? lastUser : JSON.stringify(lastUser ?? '')}`,
+      assistantDraft ? `草稿（可能包含“下一步/工具名”的文字，但未必真的执行过）：\n${assistantDraft}` : '',
+      `可用工具(JSON Schema)：${JSON.stringify(exposed)}`,
+    ].filter(Boolean).join('\n\n')
+
+    try {
+      const completion = await openai.chat.completions.create({
+        model,
+        messages: [
+          { role: 'system', content: '只输出 JSON 数组，不要输出其它文本。' },
+          { role: 'user', content: prompt },
+        ],
+        temperature: typeof temperature === 'number' ? Math.min(0.2, Math.max(0, temperature)) : 0.1,
+      })
+
+      const raw = completion.choices[0]?.message?.content || '[]'
+      const parsedAny = (() => {
+        try {
+          return JSON.parse(raw)
+        } catch {
+          const match = String(raw).match(/\[[\s\S]*\]/)
+          if (!match) return []
+          try {
+            return JSON.parse(match[0])
+          } catch {
+            return []
+          }
+        }
+      })()
+
+      if (!Array.isArray(parsedAny)) return []
+
+      return parsedAny
+        .map((item: any, idx: number) => {
+          const toolName = String(item?.toolName || item?.name || item?.tool || '')
+          const params = item?.params || item?.arguments || item?.args || {}
+          if (!toolName) return null
+          return {
+            id: `synth-${Date.now()}-${idx}-${Math.random().toString(36).slice(2)}`,
+            type: 'function' as const,
+            function: {
+              name: toolName,
+              arguments: JSON.stringify(params ?? {}),
+            },
+          }
+        })
+        .filter(Boolean) as OpenAIToolCall[]
+    } catch {
+      return []
+    }
   }
 
   private async act(toolName: string, params: Record<string, any>): Promise<string> {
@@ -497,6 +641,11 @@ export class ReActAgent {
       '3) 工具调用（精简列出工具名 + 成功/失败 + 关键信息）',
       '4) 下一步',
       '',
+      '强约束：',
+      '- “工具调用”小节只能基于 `工具调用摘要(JSON)`，不得编造不存在的工具名/状态。',
+      '- 如果 `工具调用摘要(JSON)` 为空数组，工具调用小节必须写“无”。',
+      '- 不要输出 <think> / <thinking> 之类的思维链。',
+      '',
       `用户请求：${userInput}`,
       plan.length ? `计划：\n${plan.map((p, i) => `${i + 1}. ${p}`).join('\n')}` : '计划：无',
       `工具调用摘要(JSON)：${JSON.stringify(toolSummary)}`,
@@ -525,6 +674,84 @@ export class ReActAgent {
   getCurrentIteration(): number {
     return this.currentIteration
   }
+}
+
+function stripThinkBlocks(text: string): { content: string; extractedThought: string } {
+  const raw = String(text || '')
+  let extracted = ''
+  let cleaned = raw
+
+  const patterns = [
+    /<think>[\s\S]*?<\/think>/gi,
+    /<thinking>[\s\S]*?<\/thinking>/gi,
+  ]
+
+  for (const re of patterns) {
+    const matches = cleaned.match(re) || []
+    if (matches.length) {
+      extracted += (extracted ? '\n\n' : '') + matches.map(m => m.replace(/^<\w+>|<\/\w+>$/g, '')).join('\n\n')
+      cleaned = cleaned.replace(re, '')
+    }
+  }
+
+  return { content: cleaned.trim(), extractedThought: extracted.trim() }
+}
+
+function removeToolCallsBlock(text: string): string {
+  const s = String(text || '')
+  return s.replace(/<tool_calls>[\s\S]*?<\/tool_calls>/gi, '').trim()
+}
+
+function shouldSynthesizeToolCalls(content: string): boolean {
+  const c = String(content || '').toLowerCase()
+  return (
+    c.includes('tool calls') ||
+    c.includes('工具调用') ||
+    c.includes('write_file') ||
+    c.includes('write file') ||
+    c.includes('write_workspace_file') ||
+    c.includes('update_article') ||
+    c.includes('replace_current_article_lines') ||
+    c.includes('写入') ||
+    c.includes('更新') ||
+    c.includes('同步至原文件')
+  )
+}
+
+function parseToolCallsFromContent(content: string): OpenAIToolCall[] {
+  const text = String(content || '')
+  const match = text.match(/<tool_calls>\s*([\s\S]*?)\s*<\/tool_calls>/i)
+  if (!match) return []
+
+  const jsonText = match[1].trim()
+  const parsed = safeParseJson(jsonText)
+
+  let arr: any[] = []
+  if (Array.isArray(parsed)) {
+    arr = parsed
+  } else if (Array.isArray((parsed as any)?.tool_calls)) {
+    arr = (parsed as any).tool_calls
+  } else if (Array.isArray((parsed as any)?.toolCalls)) {
+    arr = (parsed as any).toolCalls
+  } else if (Array.isArray((parsed as any)?.calls)) {
+    arr = (parsed as any).calls
+  }
+
+  return arr
+    .map((item, idx) => {
+      const toolName = String(item?.toolName || item?.name || item?.tool || '')
+      const params = item?.params || item?.arguments || item?.args || {}
+      if (!toolName) return null
+      return {
+        id: `synthetic-${Date.now()}-${idx}-${Math.random().toString(36).slice(2)}`,
+        type: 'function' as const,
+        function: {
+          name: toolName,
+          arguments: JSON.stringify(params ?? {}),
+        },
+      }
+    })
+    .filter(Boolean) as OpenAIToolCall[]
 }
 
 function toolParametersToJsonSchema(parameters: ToolParameter[]): Record<string, any> {

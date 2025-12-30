@@ -1395,6 +1395,9 @@
         "errorDesc": "文件保存失败，请重试"
       },
       "toolbar": {
+        "quote": {
+          "tooltip": "引用到聊天"
+        },
         "mark": {
           "title": "使用记录",
           "tooltip": "使用记录",

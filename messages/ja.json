@@ -1445,6 +1445,9 @@
         }
       },
       "toolbar": {
+        "quote": {
+          "tooltip": "チャットに引用"
+        },
         "organize": {
           "tooltip": "ノート整理"
         },

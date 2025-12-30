@@ -1323,6 +1323,9 @@
         "uploading": "正在上傳圖片"
       },
       "toolbar": {
+        "quote": {
+          "tooltip": "引用到聊天"
+        },
         "organize": {
           "tooltip": "整理筆記"
         },

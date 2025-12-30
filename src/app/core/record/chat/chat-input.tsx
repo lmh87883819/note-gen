@@ -21,6 +21,7 @@ import { ChatModeSelect } from "./chat-mode-select"
 import { WorkspaceFile } from "@/lib/files"
 import emitter from "@/lib/emitter"
 import { useIsMobile } from '@/hooks/use-mobile'
+import { X } from "lucide-react"
 import {
   DndContext,
   closestCenter,
@@ -37,6 +38,20 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 
+type SnippetRef = {
+  id: string
+  filePath: string
+  snippet: string
+}
+
+type InlineImageAttachment = {
+  id: string
+  name: string
+  size: number
+  type: string
+  dataUrl: string
+}
+
 
 export function ChatInput() {
   const [text, setText] = useState("")
@@ -49,6 +64,8 @@ export function ChatInput() {
   const [inputHistory, setInputHistory] = useLocalStorage<string[]>('chat-input-history', [])
   const [historyIndex, setHistoryIndex] = useState(-1)
   const [linkedFiles, setLinkedFiles] = useState<WorkspaceFile[]>([])
+  const [linkedSnippets, setLinkedSnippets] = useState<SnippetRef[]>([])
+  const [inlineImages, setInlineImages] = useState<InlineImageAttachment[]>([])
   const chatSendRef = useRef<any>(null)
   const isMobile = useIsMobile()
   const editorRef = useRef<HTMLDivElement | null>(null)
@@ -110,6 +127,8 @@ export function ChatInput() {
     setText('')
     setHistoryIndex(-1)
     setLinkedFiles([])
+    setLinkedSnippets([])
+    setInlineImages([])
     if (editorRef.current) {
       editorRef.current.innerHTML = ''
     }
@@ -197,9 +216,15 @@ export function ChatInput() {
     emitter.on('fileSelected', (event: unknown) => {
       addLinkedFileAndInsert(event as WorkspaceFile)
     })
+    emitter.on('chat-add-snippet', (event: unknown) => {
+      const payload = event as { filePath?: string; snippet?: string }
+      if (!payload?.filePath || !payload?.snippet?.trim()) return
+      addSnippetAndInsert({ filePath: payload.filePath, snippet: payload.snippet })
+    })
     return () => {
       emitter.off('revertChat')
       emitter.off('fileSelected')
+      emitter.off('chat-add-snippet')
     }
   }, [])
 
@@ -215,9 +240,71 @@ export function ChatInput() {
     })
   }
 
+  function createId() {
+    try {
+      return crypto.randomUUID()
+    } catch {
+      return `${Date.now()}-${Math.random().toString(16).slice(2)}`
+    }
+  }
+
+  function addSnippet(snippet: Omit<SnippetRef, 'id'>) {
+    const id = createId()
+    const next: SnippetRef = { id, ...snippet }
+    setLinkedSnippets((prev) => [...prev, next])
+    return next
+  }
+
+  function getSafeInsertRange(el: HTMLDivElement): Range {
+    const r = selectionRangeRef.current
+    if (r && el.contains(r.startContainer)) {
+      return r.cloneRange()
+    }
+
+    const next = document.createRange()
+    next.selectNodeContents(el)
+    next.collapse(false)
+    return next
+  }
+
+  function insertSnippetMention(snippet: SnippetRef) {
+    const el = editorRef.current
+    if (!el) return
+    el.focus()
+
+    const span = document.createElement('span')
+    span.setAttribute('data-mention', 'snippet')
+    span.setAttribute('data-id', snippet.id)
+    span.setAttribute('data-path', snippet.filePath)
+    span.contentEditable = 'false'
+    span.className = 'chat-file-mention chat-snippet-mention'
+    const name = (snippet.filePath.split('/').pop() || snippet.filePath).trim()
+    span.textContent = `@选区:${name}`
+
+    const range = getSafeInsertRange(el)
+    range.deleteContents()
+    range.insertNode(document.createTextNode(' '))
+    range.insertNode(span)
+    range.collapse(false)
+    const selection = window.getSelection()
+    if (selection) {
+      selection.removeAllRanges()
+      selection.addRange(range)
+    }
+    selectionRangeRef.current = range.cloneRange()
+
+    updateTextFromDom()
+  }
+
+  function addSnippetAndInsert(snippet: Omit<SnippetRef, 'id'>) {
+    const created = addSnippet(snippet)
+    insertSnippetMention(created)
+  }
+
   function insertFileMention(file: WorkspaceFile) {
     const el = editorRef.current
     if (!el) return
+    el.focus()
 
     const span = document.createElement('span')
     span.setAttribute('data-mention', 'file')
@@ -228,21 +315,17 @@ export function ChatInput() {
     span.className = 'chat-file-mention'
     span.textContent = `@${file.name}`
 
-    const range = selectionRangeRef.current || window.getSelection()?.getRangeAt(0) || null
-    if (range) {
-      range.deleteContents()
-      range.insertNode(document.createTextNode(' '))
-      range.insertNode(span)
-      range.collapse(false)
-      const selection = window.getSelection()
-      if (selection) {
-        selection.removeAllRanges()
-        selection.addRange(range)
-      }
-    } else {
-      el.appendChild(span)
-      el.appendChild(document.createTextNode(' '))
+    const range = getSafeInsertRange(el)
+    range.deleteContents()
+    range.insertNode(document.createTextNode(' '))
+    range.insertNode(span)
+    range.collapse(false)
+    const selection = window.getSelection()
+    if (selection) {
+      selection.removeAllRanges()
+      selection.addRange(range)
     }
+    selectionRangeRef.current = range.cloneRange()
 
     updateTextFromDom()
   }
@@ -378,7 +461,7 @@ export function ChatInput() {
       }
       if (node.nodeType === Node.ELEMENT_NODE) {
         const element = node as HTMLElement
-        if (element.dataset.mention === 'file') {
+        if (element.dataset.mention === 'file' || element.dataset.mention === 'snippet') {
           // mention 不污染输入：不把 @file 写进发送给 AI 的文本，只作为 UI 标记
           parts.push('')
           return
@@ -388,6 +471,27 @@ export function ChatInput() {
     })
 
     setText(parts.join('').replace(/\u00A0/g, ' '))
+
+    // 同步输入框里真实存在的 mentions，避免删掉 chip 后仍然携带附件
+    const fileMentions = Array.from(el.querySelectorAll('span[data-mention="file"]')) as HTMLSpanElement[]
+    const nextFiles: WorkspaceFile[] = []
+    const seen = new Set<string>()
+    for (const span of fileMentions) {
+      const path = span.dataset.path || ''
+      if (!path) continue
+      if (seen.has(path)) continue
+      seen.add(path)
+      nextFiles.push({
+        path,
+        name: span.dataset.name || (path.split('/').pop() || path),
+        relativePath: span.dataset.relativePath || '',
+      } as WorkspaceFile)
+    }
+    setLinkedFiles(nextFiles)
+
+    const snippetMentions = Array.from(el.querySelectorAll('span[data-mention="snippet"]')) as HTMLSpanElement[]
+    const activeIds = new Set(snippetMentions.map(s => s.dataset.id).filter(Boolean) as string[])
+    setLinkedSnippets((prev) => prev.filter(s => activeIds.has(s.id)))
   }
 
   function setContentText(next: string) {
@@ -398,17 +502,59 @@ export function ChatInput() {
     }
   }
 
+  async function handleDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault()
+    e.stopPropagation()
+
+    const files = Array.from(e.dataTransfer?.files || [])
+    if (files.length === 0) return
+
+    const nextImages: InlineImageAttachment[] = []
+    for (const file of files) {
+      if (!file.type?.startsWith('image/')) continue
+      const maxBytes = 4 * 1024 * 1024
+      if (file.size > maxBytes) continue
+
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result || ''))
+        reader.onerror = () => reject(new Error('Failed to read image'))
+        reader.readAsDataURL(file)
+      }).catch(() => '')
+
+      if (!dataUrl) continue
+
+      nextImages.push({
+        id: createId(),
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        dataUrl,
+      })
+    }
+
+    if (nextImages.length) {
+      setInlineImages((prev) => [...prev, ...nextImages].slice(0, 8))
+    }
+  }
+
   return (
     <footer className="flex flex-col w-full p-1 justify-between items-center">
       <div className="group relative flex flex-col border rounded-xl z-10 gap-2 p-1 w-full bg-background focus-within:border-primary transition-colors">
         <div className="relative w-full flex items-start px-2 pt-2">
           <div
             ref={editorRef}
-            className="chat-input-ce flex-1 text-xs md:text-sm outline-none min-h-[72px] max-h-[240px] overflow-y-auto whitespace-pre-wrap break-words"
+            className="chat-input-ce flex-1 text-xs md:text-sm outline-none min-h-[96px] max-h-[240px] overflow-y-auto whitespace-pre-wrap break-words"
             contentEditable={!loading && !!primaryModel}
             suppressContentEditableWarning
             data-placeholder={placeholder}
-            data-empty={text.trim() === '' && linkedFiles.length === 0 ? 'true' : 'false'}
+            data-empty={text.trim() === '' && linkedFiles.length === 0 && linkedSnippets.length === 0 && inlineImages.length === 0 ? 'true' : 'false'}
+            onDragOver={(e) => {
+              if (e.dataTransfer?.types?.includes?.('Files')) {
+                e.preventDefault()
+              }
+            }}
+            onDrop={handleDrop}
             onBeforeInput={(e) => {
               if (loading || !primaryModel) return
               const native = e.nativeEvent as unknown as InputEvent
@@ -498,6 +644,24 @@ export function ChatInput() {
           />
         </div>
         
+        {inlineImages.length > 0 && (
+          <div className="flex flex-wrap gap-2 px-2 pb-1">
+            {inlineImages.map((img) => (
+              <div key={img.id} className="flex items-center gap-2 rounded-md border px-2 py-1 text-xs bg-background">
+                <span className="truncate max-w-[220px]">{img.name}</span>
+                <button
+                  type="button"
+                  className="opacity-70 hover:opacity-100"
+                  onClick={() => setInlineImages(prev => prev.filter(p => p.id !== img.id))}
+                  aria-label="Remove image"
+                >
+                  <X className="size-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="flex justify-between items-center w-full">
           <div className="relative flex-1 overflow-x-auto mr-6 px-2 -translate-x-2">
             {/* 左侧渐变遮罩 */}
@@ -564,7 +728,14 @@ export function ChatInput() {
           </div>
           <div className="flex items-center justify-end gap-2 pr-1">
             <ChatModeSelect />
-            <ChatSend inputValue={text} onSent={handleSent} linkedFiles={linkedFiles} ref={chatSendRef} />
+            <ChatSend
+              inputValue={text}
+              onSent={handleSent}
+              linkedFiles={linkedFiles}
+              linkedSnippets={linkedSnippets}
+              inlineImages={inlineImages}
+              ref={chatSendRef}
+            />
           </div>
         </div>
 

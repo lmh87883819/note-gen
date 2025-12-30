@@ -1,12 +1,10 @@
 import { Tool } from '../types'
-import { noteTools } from './note-tools'
-import { chatTools } from './chat-tools'
 import { folderTools } from './folder-tools'
+import { workspaceTools } from './workspace-tools'
 
 export const allTools: Tool[] = [
-  ...noteTools,
-  ...chatTools,
   ...folderTools,
+  ...workspaceTools,
 ]
 
 export function getToolByName(name: string): Tool | undefined {
@@ -33,6 +31,5 @@ ${params || '  None'}
   }).join('\n\n')
 }
 
-export * from './note-tools'
-export * from './chat-tools'
 export * from './folder-tools'
+export * from './workspace-tools'

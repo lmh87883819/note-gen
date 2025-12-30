@@ -156,3 +156,7 @@ pre.hljs {
   font-size: 12px;
   line-height: 16px;
 }
+
+.chat-snippet-mention {
+  @apply bg-primary/10 border-primary/20;
+}

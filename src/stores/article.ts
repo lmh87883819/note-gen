@@ -126,8 +126,9 @@ const useArticleStore = create<NoteState>((set, get) => ({
   sortFileTree: (tree: DirTree[]) => {
     const sortType = get().sortType
     const sortDirection = get().sortDirection
-    if (sortType === 'none') return tree
-    
+    // 默认也需要稳定排序：文件夹在上、同级按名称排序（否则 readDir 顺序不稳定）
+    const effectiveSortType: SortType = sortType === 'none' ? 'name' : sortType
+
     const sortedTree = cloneDeep(tree)
     
     const sortFunction = (a: DirTree, b: DirTree) => {
@@ -135,26 +136,26 @@ const useArticleStore = create<NoteState>((set, get) => ({
       if (!a.isDirectory && b.isDirectory) return 1
       
       let result = 0
-      switch (sortType) {
-        case 'name':
+      switch (effectiveSortType) {
+      case 'name':
+        result = a.name.localeCompare(b.name)
+        break
+      case 'created':
+        if (a.createdAt && b.createdAt) {
+          result = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+        } else {
           result = a.name.localeCompare(b.name)
-          break
-        case 'created':
-          if (a.createdAt && b.createdAt) {
-            result = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-          } else {
-            result = a.name.localeCompare(b.name)
-          }
-          break
-        case 'modified':
-          if (a.modifiedAt && b.modifiedAt) {
-            result = new Date(a.modifiedAt).getTime() - new Date(b.modifiedAt).getTime()
-          } else {
-            result = a.name.localeCompare(b.name)
-          }
-          break
-        default:
-          result = 0
+        }
+        break
+      case 'modified':
+        if (a.modifiedAt && b.modifiedAt) {
+          result = new Date(a.modifiedAt).getTime() - new Date(b.modifiedAt).getTime()
+        } else {
+          result = a.name.localeCompare(b.name)
+        }
+        break
+      default:
+        result = a.name.localeCompare(b.name)
       }
       
       return sortDirection === 'asc' ? result : -result

@@ -52,6 +52,8 @@ interface ChatState {
   setChatMode: (mode: ChatMode) => void
   
   agentState: AgentState
+  agentMemorySummary: string
+  setAgentMemorySummary: (summary: string) => void
   setAgentState: (state: Partial<AgentState>) => void
   resetAgentState: () => void
   addAgentToolCall: (toolCall: ToolCall) => void
@@ -95,6 +97,11 @@ const useChatStore = create<ChatState>((set, get) => ({
     pendingConfirmation: undefined,
     confirmationHistory: [],
     lastError: undefined,
+  },
+
+  agentMemorySummary: '',
+  setAgentMemorySummary: (summary: string) => {
+    set({ agentMemorySummary: summary })
   },
 
   setAgentState: (state: Partial<AgentState>) => {
@@ -251,6 +258,7 @@ const useChatStore = create<ChatState>((set, get) => ({
   clearChats: async () => {
     set({ chats: [] })
     await clearChatsByTagId()
+    set({ agentMemorySummary: '' })
   },
 
   updateInsert: async (id) => {

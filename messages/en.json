@@ -1383,6 +1383,9 @@
         }
       },
       "toolbar": {
+        "quote": {
+          "tooltip": "Quote to chat"
+        },
         "organize": {
           "tooltip": "Organize Notes"
         },

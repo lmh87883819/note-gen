@@ -2,7 +2,8 @@
 import { Send, Square } from "lucide-react"
 import useSettingStore from "@/stores/setting"
 import useChatStore from "@/stores/chat"
-import { fetchAiStream } from "@/lib/ai"
+import useArticleStore from "@/stores/article"
+import { fetchAiStream, getAISettings, createOpenAIClient } from "@/lib/ai"
 import { TooltipButton } from "@/components/tooltip-button"
 import { useImperativeHandle, forwardRef, useRef } from "react"
 import { useTranslations } from "next-intl"
@@ -20,11 +21,14 @@ interface ChatSendProps {
   inputValue: string;
   onSent?: () => void;
   linkedFiles?: WorkspaceFile[];
+  linkedSnippets?: { id: string; filePath: string; snippet: string }[];
+  inlineImages?: { id: string; name: string; dataUrl: string }[];
 }
 
-export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ inputValue, onSent, linkedFiles }, ref) => {
+export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ inputValue, onSent, linkedFiles, linkedSnippets, inlineImages }, ref) => {
   const { primaryModel } = useSettingStore()
-  const { insert, loading, setLoading, saveChat, chats, chatMode, requestAgentConfirmation } = useChatStore()
+  const { insert, loading, setLoading, saveChat, chats, chatMode, requestAgentConfirmation, agentMemorySummary, setAgentMemorySummary } = useChatStore()
+  const { activeFilePath, currentArticle } = useArticleStore()
   const { isRagEnabled } = useVectorStore()
   const { selectedServerIds } = useMcpStore()
   const abortControllerRef = useRef<AbortController | null>(null)
@@ -36,7 +40,7 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
   }))
 
   // Agent 模式处理
-  async function handleAgentMode() {
+  async function handleAgentMode(userInput: string) {
     // 先创建一个占位的 AI 消息
     const placeholderMessage = await insert({
       role: 'system',
@@ -49,7 +53,16 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
 
     // Agent 上下文：把 @ 引用的文件内容作为 context 传入（避免污染用户输入本身）
     const attachments = await buildLinkedFileAttachments(linkedFiles)
-    const agentContext = attachments.textContext
+    const inlineImageUrls = (inlineImages || []).map(i => i.dataUrl).filter(Boolean)
+    const imageUrls = [...attachments.imageUrls, ...inlineImageUrls]
+    const agentContext = buildAgentContext({
+      activeFilePath,
+      currentArticle,
+      agentMemorySummary,
+      linkedFilesContext: attachments.textContext,
+      linkedSnippets,
+      chats,
+    })
 
     // 每次都创建新的 AgentHandler，使用当前的 placeholderMessage
     const agentHandler = new AgentHandler({
@@ -74,6 +87,23 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
           content: result,
           agentHistory: JSON.stringify(agentHistory),
         }, true)
+
+        // 触发式：接近“超窗/变慢”时才更新“记忆摘要”
+        const shouldUpdateMemory = shouldUpdateAgentMemory({
+          contextLength: agentContext.length,
+          toolCallsCount: agentState.toolCalls.length,
+          iterations: agentState.currentIteration,
+          finalAnswerLength: (result || '').length,
+        })
+        if (shouldUpdateMemory) {
+          const memory = await generateAgentMemorySummary({
+            userRequest: userInput,
+            plan: agentState.plan,
+            toolCalls: agentState.toolCalls,
+            finalAnswer: result,
+          })
+          if (memory) setAgentMemorySummary(memory)
+        }
         
         // 清空 ref
         agentHandlerRef.current = null
@@ -94,7 +124,7 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
     agentHandlerRef.current = agentHandler
 
     try {
-      await agentHandler.execute(inputValue, agentContext || undefined, { imageUrls: attachments.imageUrls })
+      await agentHandler.execute(userInput, agentContext || undefined, { imageUrls })
     } catch (error) {
       console.error('Agent execution error:', error)
     } finally {
@@ -105,7 +135,13 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
 
   // 对话
   async function handleSubmit() {
-    if (inputValue === '') return
+    const hasAnyAttachment =
+      (linkedFiles?.length || 0) > 0 ||
+      (linkedSnippets?.length || 0) > 0 ||
+      (inlineImages?.length || 0) > 0
+
+    if (!inputValue.trim() && !hasAnyAttachment) return
+    const effectiveInputValue = inputValue.trim() ? inputValue : '[Attachments]'
     onSent?.()
     
     // Agent 模式
@@ -113,11 +149,11 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
       setLoading(true)
       await insert({
         role: 'user',
-        content: inputValue,
+        content: effectiveInputValue,
         type: 'chat',
         inserted: false,
       })
-      await handleAgentMode()
+      await handleAgentMode(effectiveInputValue)
       setLoading(false)
       return
     }
@@ -126,7 +162,7 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
     setLoading(true)
     await insert({
       role: 'user',
-      content: inputValue,
+      content: effectiveInputValue,
       type: 'chat',
       inserted: false,
       image: undefined,
@@ -148,7 +184,10 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
     let ragContext = ''
     let ragSources: string[] = []
     const attachments = await buildLinkedFileAttachments(linkedFiles)
+    const inlineImageUrls = (inlineImages || []).map(i => i.dataUrl).filter(Boolean)
+    const imageUrls = [...attachments.imageUrls, ...inlineImageUrls]
     const linkedFilesContent = attachments.textContext
+    const snippetContext = buildSnippetContext(linkedSnippets)
     
     // 如果启用RAG，获取相关上下文
     if (isRagEnabled) {
@@ -181,8 +220,9 @@ ${ragContext}
           .join(';\n\n')
       }
       ${linkedFilesContent.trim()}
+      ${snippetContext.trim()}
       ${ragContext.trim()}
-      ${inputValue.trim()}
+      ${effectiveInputValue.trim()}
     `.trim()
 
     // 先保存空消息，然后通过流式请求更新
@@ -205,10 +245,10 @@ ${ragContext}
     // 使用流式方式获取AI结果（多模态：图片以 content parts 传入）
     let cache_content = '';
     try {
-      const userContent: any = attachments.imageUrls.length
+      const userContent: any = imageUrls.length
         ? ([
             { type: 'text', text: request_content },
-            ...attachments.imageUrls.map(url => ({ type: 'image_url', image_url: { url } }))
+            ...imageUrls.map(url => ({ type: 'image_url', image_url: { url } }))
           ])
         : request_content
 
@@ -263,13 +303,20 @@ ${ragContext}
     }
   }
 
+  const canSend =
+    !!primaryModel &&
+    (inputValue.trim() ||
+      (linkedFiles?.length || 0) > 0 ||
+      (linkedSnippets?.length || 0) > 0 ||
+      (inlineImages?.length || 0) > 0)
+
   return (
     <>
       <TooltipButton 
         variant={loading ? "destructive" : "default"}
         size="sm"
         icon={loading ? <Square className="size-4" /> : <Send className="size-4" />} 
-        disabled={!loading && (!primaryModel || !inputValue.trim())} 
+        disabled={!loading && !canSend} 
         tooltipText={loading ? t('record.chat.input.stop') : t('record.chat.input.send')} 
         onClick={loading ? handleStop : handleSubmit} 
       />
@@ -287,6 +334,7 @@ async function buildLinkedFileAttachments(linkedFiles?: WorkspaceFile[]): Promis
 
   const fileContents: string[] = []
   const imageUrls: string[] = []
+  let totalTextChars = 0
 
   try {
     const workspace = await getWorkspacePath()
@@ -324,12 +372,30 @@ async function buildLinkedFileAttachments(linkedFiles?: WorkspaceFile[]): Promis
           continue
         }
 
-        // 文本优先：能读就作为上下文传入
+        // 文本优先：能读就作为上下文传入（但做 hard cap，避免 @ 多文件导致上下文爆炸；完整内容可用 read_workspace_file 再取）
         const content = await readWorkspaceFileText(workspace.isCustom, file.path)
         if (content) {
+          const MAX_PER_FILE_CHARS = 12000
+          const MAX_TOTAL_CHARS = 30000
+
+          const remaining = Math.max(0, MAX_TOTAL_CHARS - totalTextChars)
+          if (remaining <= 0) {
+            fileContents.push(`[Text file omitted] ${file.relativePath} (context budget exceeded; use read_workspace_file)`)
+            continue
+          }
+
+          const clipped = content.length > MAX_PER_FILE_CHARS
+            ? `${content.slice(0, MAX_PER_FILE_CHARS)}\n\n[...truncated ${content.length - MAX_PER_FILE_CHARS} chars...]`
+            : content
+
+          const finalContent = clipped.length > remaining
+            ? `${clipped.slice(0, remaining)}\n\n[...truncated ${clipped.length - remaining} chars due to total budget...]`
+            : clipped
+
+          totalTextChars += finalContent.length
           fileContents.push(`
 The following is the content of the linked file "${file.name}" (${file.relativePath}):
-${content}
+${finalContent}
 `.trim())
           continue
         }
@@ -359,6 +425,71 @@ Base64: ${base64}
     console.error('Failed to build linked file attachments:', error)
     return { textContext: '', imageUrls: [] }
   }
+}
+
+function buildAgentContext(args: {
+  activeFilePath: string
+  currentArticle: string
+  agentMemorySummary: string
+  linkedFilesContext: string
+  linkedSnippets?: { id: string; filePath: string; snippet: string }[]
+  chats: any[]
+}): string {
+  const parts: string[] = []
+
+  if (args.agentMemorySummary) {
+    parts.push(`## Previous Agent Summary\n${args.agentMemorySummary}`)
+  }
+
+  if (args.activeFilePath) {
+    const content = args.currentArticle || ''
+    const excerpt = buildTextExcerpt(content, { head: 3500, tail: 1500 })
+    parts.push([
+      `## Current Article`,
+      `Path: ${args.activeFilePath}`,
+      `Length: ${content.length} chars`,
+      `Note: For full content, use tool "get_current_article" or "read_workspace_file".`,
+      '',
+      excerpt,
+    ].join('\n'))
+  }
+
+  if (args.linkedFilesContext) {
+    parts.push(`## Mentioned Files\n${args.linkedFilesContext}`)
+  }
+
+  const snippetContext = buildSnippetContext(args.linkedSnippets)
+  if (snippetContext) {
+    parts.push(snippetContext)
+  }
+
+  // 最近对话上下文（避免每次都“新对话”）
+  const recent = args.chats
+    .filter((c: any) => c?.type === 'chat' && c?.content)
+    .slice(-12)
+    .map((c: any) => `${c.role === 'user' ? 'User' : 'Assistant'}: ${String(c.content).slice(0, 1000)}`)
+    .join('\n')
+
+  if (recent) {
+    parts.push(`## Recent Chat\n${recent}`)
+  }
+
+  return parts.join('\n\n')
+}
+
+function buildSnippetContext(linkedSnippets?: { id: string; filePath: string; snippet: string }[]): string {
+  if (!linkedSnippets || linkedSnippets.length === 0) return ''
+
+  const maxSnippetChars = 2000
+  const items = linkedSnippets.map((s) => {
+    const snippet = (s.snippet || '').trim()
+    const clipped = snippet.length > maxSnippetChars
+      ? `${snippet.slice(0, maxSnippetChars)}\n\n[...truncated ${snippet.length - maxSnippetChars} chars...]`
+      : snippet
+    return `### ${s.filePath}\n${clipped}`
+  })
+
+  return `## Selected Snippets\n${items.join('\n\n')}`
 }
 
 async function readWorkspaceFileText(isCustom: boolean, path: string): Promise<string> {
@@ -394,4 +525,81 @@ function uint8ToBase64(bytes: Uint8Array): string {
     binary += String.fromCharCode(...chunk)
   }
   return btoa(binary)
+}
+
+function shouldUpdateAgentMemory(args: { contextLength: number; toolCallsCount: number; iterations: number; finalAnswerLength: number }) {
+  // 触发式：综合“上下文体积 + 工具调用密度 + 迭代次数 + 输出长度”判断是否需要生成记忆摘要
+  const MAX_CONTEXT_CHARS = 25000
+  const MAX_TOOL_CALLS = 8
+  const MAX_ITERATIONS = 8
+  const MAX_FINAL_ANSWER_CHARS = 6000
+
+  return (
+    args.contextLength >= MAX_CONTEXT_CHARS ||
+    args.toolCallsCount >= MAX_TOOL_CALLS ||
+    args.iterations >= MAX_ITERATIONS ||
+    args.finalAnswerLength >= MAX_FINAL_ANSWER_CHARS
+  )
+}
+
+function buildTextExcerpt(text: string, opts: { head: number; tail: number }) {
+  const head = Math.max(0, Math.floor(opts.head))
+  const tail = Math.max(0, Math.floor(opts.tail))
+  const t = String(text || '')
+  if (t.length === 0) return '(empty)'
+
+  if (t.length <= head + tail + 200) return t
+
+  const headPart = t.slice(0, head)
+  const tailPart = t.slice(Math.max(0, t.length - tail))
+  return [
+    headPart,
+    '',
+    `[...omitted ${(t.length - headPart.length - tailPart.length)} chars...]`,
+    '',
+    tailPart,
+  ].join('\n')
+}
+
+async function generateAgentMemorySummary(args: {
+  userRequest: string
+  plan: string[]
+  toolCalls: any[]
+  finalAnswer: string
+}): Promise<string> {
+  try {
+    const aiConfig = await getAISettings()
+    if (!aiConfig?.baseURL || !aiConfig?.model) return ''
+
+    const openai = await createOpenAIClient(aiConfig)
+
+    const prompt = [
+      '你是对话记忆压缩器。请把一次 Agent 执行压缩成“下次继续工作”所需的最小记忆。',
+      '要求：',
+      '- 只输出 JSON，对象结构：{ \"memory\": string }',
+      '- memory <= 1200 字符，包含：目标/已完成/当前文章相关关键事实/未完成事项（如有）',
+      '- 不要包含大段原文，不要包含代码块',
+      '',
+      `用户请求：${args.userRequest}`,
+      args.plan?.length ? `计划：\n${args.plan.map((p, i) => `${i + 1}. ${p}`).join('\n')}` : '计划：无',
+      `工具调用（简要）：${JSON.stringify(args.toolCalls?.map(c => ({ toolName: c.toolName, status: c.status, error: c.result?.error })) || [])}`,
+      `最终输出（截断）：${String(args.finalAnswer || '').slice(0, 6000)}`,
+    ].join('\n\n')
+
+    const completion = await openai.chat.completions.create({
+      model: aiConfig.model,
+      messages: [
+        { role: 'system', content: '只输出 JSON 对象，不要输出其他文本。' },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.2,
+    })
+
+    const content = completion.choices[0]?.message?.content || ''
+    const obj = JSON.parse(content)
+    const memory = String(obj?.memory || '').trim()
+    return memory.length > 1200 ? memory.slice(0, 1200) : memory
+  } catch {
+    return ''
+  }
 }

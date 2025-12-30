@@ -8,7 +8,7 @@ export const createFolderTool: Tool = {
   name: 'create_folder',
   description: '创建一个新的文件夹用于组织笔记',
   category: 'note',
-  requiresConfirmation: false,
+  requiresConfirmation: true,
   parameters: [
     {
       name: 'folderPath',

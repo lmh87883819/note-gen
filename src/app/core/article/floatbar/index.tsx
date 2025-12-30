@@ -3,6 +3,7 @@ import Question from "./question";
 import Polish from "./polish";
 import Eraser from "./eraser";
 import Expansion from "./expansion";
+import QuoteToChat from "./quote";
 import Vditor from "vditor";
 
 export default function FloatBar({left, top, value, editor}: {left?: number, top?: number, value?: string, editor?: Vditor}) {
@@ -12,6 +13,7 @@ export default function FloatBar({left, top, value, editor}: {left?: number, top
       style={{left: left + 'px', top: (top || 0) < 64 ? (top || 0) + 82 + 'px' : (top || 0) + 'px'}}>
       <div className="flex items-center justify-between">
         <div className="flex items-center">
+          <QuoteToChat editor={editor} value={value} />
           <Question editor={editor} value={value} />
           <Polish editor={editor} value={value} />
           <Eraser editor={editor} value={value} />

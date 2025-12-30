@@ -130,8 +130,15 @@ export function MdEditor() {
             setLocalMode(mode as 'ir' | 'sv' | 'wysiwyg')
           })
         })
-        if (activeFilePath === '') {
+        const { currentArticle: latestArticle, activeFilePath: latestActivePath } = useArticleStore.getState()
+        // 初始化完成后，确保把当前文件内容写入编辑器并渲染预览（避免双屏预览时右侧不渲染）
+        if (!latestActivePath) {
           vditor.setValue('', true)
+        } else {
+          vditor.setValue(latestArticle || '', false)
+          try {
+            vditor.renderPreview()
+          } catch {}
         }
         setEditorPadding(vditor)
       },
@@ -322,7 +329,7 @@ export function MdEditor() {
     if (!instance) return
     try {
       instance.setValue(content, false)
-      instance.renderPreview(content)
+      instance.renderPreview()
     } catch (error) {
       console.error('Error setting editor content:', error)
     }
@@ -597,6 +604,9 @@ export function MdEditor() {
                   mode: currentMode,
                   after: () => {
                     vditor.setValue(currentContent, false)
+                    try {
+                      vditor.renderPreview()
+                    } catch {}
                     setEditor(vditor)
                     editorRef.current = vditor
                     isReinitializingRef.current = false

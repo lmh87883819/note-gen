@@ -151,6 +151,7 @@ export const updateArticleTool: Tool = {
   requiresConfirmation: true,
   parameters: [
     { name: 'content', type: 'string', description: '要写入的新内容（完整文章）', required: true },
+    { name: 'allowEmpty', type: 'boolean', description: '是否允许写入空内容（默认 false，防止误清空）', required: false, default: false },
   ],
   execute: async (params): Promise<ToolResult> => {
     const store = useArticleStore.getState()
@@ -158,6 +159,10 @@ export const updateArticleTool: Tool = {
     if (!activeFilePath) return { success: false, error: '当前没有打开的文章文件' }
 
     const content = String(params.content ?? '')
+    const allowEmpty = Boolean(params.allowEmpty)
+    if (!allowEmpty && content.trim().length === 0) {
+      return { success: false, error: 'content 为空：为防止误清空，已拒绝写入。确实要清空请传 allowEmpty=true' }
+    }
     store.setCurrentArticle(content)
     await store.saveCurrentArticle(content)
 
@@ -292,12 +297,17 @@ export const writeWorkspaceFileTool: Tool = {
   parameters: [
     { name: 'filePath', type: 'string', description: '可选：相对路径（默认工作区）或绝对路径（自定义工作区）；不传则写入当前打开的文章', required: false },
     { name: 'content', type: 'string', description: '要写入的文本内容', required: true },
+    { name: 'allowEmpty', type: 'boolean', description: '是否允许写入空内容（默认 false，防止误清空）', required: false, default: false },
   ],
   execute: async (params): Promise<ToolResult> => {
     const filePathFromParams = String(params.filePath || '').trim()
     const filePath = filePathFromParams || useArticleStore.getState().activeFilePath || ''
     if (!filePath) return { success: false, error: 'filePath 不能为空（且当前没有打开的文章可作为默认写入目标）' }
     const content = String(params.content ?? '')
+    const allowEmpty = Boolean(params.allowEmpty)
+    if (!allowEmpty && content.trim().length === 0) {
+      return { success: false, error: 'content 为空：为防止误清空，已拒绝写入。确实要清空请传 allowEmpty=true' }
+    }
 
     try {
       const workspace = await getWorkspacePath()
@@ -315,16 +325,29 @@ export const writeWorkspaceFileTool: Tool = {
       }
 
       let verifyLength: number | null = null
+      let verifyMatches: boolean | null = null
+      let verifyPreview: string | null = null
       try {
         const text = workspace.isCustom
           ? await readTextFile(resolved.path)
           : await readTextFile(resolved.path, { baseDir: resolved.baseDir })
         verifyLength = text.length
+        const normalize = (s: string) => String(s || '').replace(/\r\n/g, '\n')
+        verifyMatches = normalize(text) === normalize(content)
+        verifyPreview = text.slice(0, 2000)
       } catch {}
+
+      if (verifyMatches === false) {
+        return {
+          success: false,
+          data: { filePath, workspace, resolvedPath: resolved.path, verifyLength, verifyMatches, verifyPreview },
+          error: '写入校验失败：读取回来的内容与写入内容不一致（可能写入到错误路径/被外部改写/发生截断）',
+        }
+      }
 
       return {
         success: true,
-        data: { filePath, workspace, resolvedPath: resolved.path, verifyLength },
+        data: { filePath, workspace, resolvedPath: resolved.path, verifyLength, verifyMatches, verifyPreview },
         message: `已写入文件: ${filePath}`,
       }
     } catch (error) {

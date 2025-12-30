@@ -99,34 +99,6 @@ export function AgentExecutionStatus() {
               </code>
             </div>
           )}
-
-          {/* 当前确认请求 */}
-          {agentState.pendingConfirmation && (
-            <div className="flex items-center gap-2 py-1.5 px-3 rounded bg-muted">
-              <Clock className="size-3.5 text-orange-500 flex-shrink-0 animate-pulse" />
-              <code className="text-xs text-muted-foreground flex-1 break-words font-mono">
-                {agentState.pendingConfirmation.toolName}
-              </code>
-              <div className="flex gap-1 flex-shrink-0">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-6 w-6 p-0"
-                  onClick={() => resolveAgentConfirmation(false)}
-                >
-                  <XCircle className="size-3.5 text-red-500" />
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-6 w-6 p-0"
-                  onClick={() => resolveAgentConfirmation(true)}
-                >
-                  <CheckCircle className="size-3.5 text-green-500" />
-                </Button>
-              </div>
-            </div>
-          )}
         </div>
       )}
 
@@ -135,6 +107,38 @@ export function AgentExecutionStatus() {
         <div className="py-1.5 px-3 rounded bg-muted/40 flex items-center gap-2">
           <Loader2 className="size-3.5 animate-spin text-blue-500 flex-shrink-0" />
           <span className="text-xs text-muted-foreground break-words">{statusTitle}</span>
+        </div>
+      )}
+
+      {/* 当前确认请求：无论是否有思考内容都显示 */}
+      {agentState.pendingConfirmation && (
+        <div className="flex items-center gap-2 py-1.5 px-3 rounded bg-muted">
+          <Clock className="size-3.5 text-orange-500 flex-shrink-0 animate-pulse" />
+          <code className="text-xs text-muted-foreground flex-1 break-words font-mono">
+            {agentState.pendingConfirmation.toolName}
+          </code>
+          <div className="flex gap-1 flex-shrink-0">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 w-6 p-0"
+              onClick={() => resolveAgentConfirmation(false)}
+              aria-label="取消"
+              title="取消"
+            >
+              <XCircle className="size-3.5 text-red-500" />
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 w-6 p-0"
+              onClick={() => resolveAgentConfirmation(true)}
+              aria-label="确认"
+              title="确认"
+            >
+              <CheckCircle className="size-3.5 text-green-500" />
+            </Button>
+          </div>
         </div>
       )}
 

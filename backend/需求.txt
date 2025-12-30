@@ -1,0 +1,210 @@
+这是一个非常严肃且高难度的项目。要打造一款“设计师专用的全能 Agent”（对标 Lovable/v0 但侧重多媒体设计），盲目堆砌 Agent 数量或者死板地用 Workflow 都会导致产品既不灵活也不智能。
+
+经过深度思考，我认为**“动态规划 + 自适应执行”**的混合架构才是唯一解。单纯的 Agno Workflow 太死板，单纯的 Agent Team 太不可控。
+
+以下是为你量身定制的产品需求文档 (PRD) 和 技术架构方案。
+
+📅 产品需求文档 (PRD): "DesignOS" (代号)
+1. 产品定位
+
+一款面向专业设计师的 AI 协作中台（Desktop Copilot）。
+它不是简单的“文生图工具”，而是一个能理解复杂设计意图、自动拆解任务、并调度多种 AI 模型完成工作的设计执行官。
+
+核心差异点：
+
+Context Aware（上下文感知）：理解“把刚才那张图的背景换掉”中的指代关系。
+
+Multi-Step Reasoning（多步推理）：理解“生成一组赛博朋克风格的图标，并把它们拼成一张海报”这种复合指令。
+
+Human-in-the-loop（人机协作）：允许设计师在中间环节干预（如：修补 Mask、调整 Prompt），而不是盲盒式生成。
+
+2. 核心功能模块 (MVP)
+A. 智能指令解析 (The Brain)
+
+自然语言理解：支持模糊指令（“这图感觉不对，再暗一点”）。
+
+意图拆解：将一句话拆解为 DAG（有向无环图）任务链。
+
+参数补全：自动补充缺失的参数（如用户没说分辨率，AI 根据“海报”一词自动补全为 1080x1920）。
+
+B. 多模态工作流 (The Hands)
+
+图像生成与编辑：Text-to-Image, Image-to-Image, Inpainting (局部重绘), Outpainting (扩图), Remove Background。
+
+动态视觉：Image-to-Video, Frame Interpolation (插帧)。
+
+资产管理：本地保存所有生成的素材，支持拖拽到 Photoshop/Figma。
+
+C. 交互体验 (The Interface)
+
+Chat-to-Design：左侧对话，右侧画布（Infinite Canvas）。
+
+流式反馈：任务执行时，实时展示“思考中... -> 正在生图... -> 正在转视频...”。
+
+版本控制：保留每一次生成的历史，支持一键回滚。
+
+3. 技术架构方案 (关键)
+
+不要单纯用 Workflow 或 Team。我推荐 "Hierarchical Planning Architecture" (分层规划架构)。
+
+架构图示
+code
+Mermaid
+download
+content_copy
+expand_less
+graph TD
+    User[设计师] --> FE[Electron 前端]
+    FE --> API[FastAPI 网关]
+    
+    subgraph "Backend (Python/Agno)"
+        API --> Memory[短期记忆/Context]
+        API --> Planner[总规划师 Agent]
+        
+        Planner --"生成 JSON 计划"--> Scheduler[调度器 (Orchestrator)]
+        
+        Scheduler --> Worker1[视觉专家 Agent]
+        Scheduler --> Worker2[修图专家 Agent]
+        Scheduler --> Worker3[视频专家 Agent]
+        
+        Worker1 --> Tools[Fal.ai / ComfyUI / Local Tools]
+        Worker2 --> Tools
+        Worker3 --> Tools
+    end
+    
+    Scheduler --"流式进度 SSE"--> FE
+核心组件设计
+1. 总规划师 (The Planner) - 这是最关键的差异点
+
+角色：它不干活，只负责写**“施工图纸”**。
+
+技术实现：
+
+使用 Agno Agent，配置 response_model 为复杂的 Pydantic 结构。
+
+关键逻辑：它必须能够查询 Memory，理解用户说的“它”是指上一轮生成的哪个 asset_id。
+
+输出：不是文本，而是一个包含依赖关系的 Task List。
+
+2. 调度器 (The Scheduler) - 而非 Agno 自带的 Loop
+
+为什么需要它：Agno 的 Team 对话模式太慢且不可控。你需要一个 Python 编写的“包工头”。
+
+职责：
+
+接收 Planner 的 Task List。
+
+并发控制：如果 Step 1 和 Step 2 不冲突，同时启动它们。
+
+错误恢复：如果 Step 2 失败，自动尝试 3 次，或者把错误返还给 Planner 让它重新规划。
+
+状态推送：通过 SSE 向 Electron 推送 { step_id: 1, status: "processing", progress: 45 }。
+
+3. 专家组 (The Specialists) - 原子能力的封装
+
+不要做一个全能 Tool Agent。要做专才：
+
+ImageGenAgent: 专精 Prompt 优化，它知道 FLUX 模型喜欢什么样的提示词。
+
+VideoGenAgent: 专精参数调整，它知道 Luma 需要什么样的首尾帧。
+
+协作方式：Scheduler 拿着 Task 1 找 ImageGenAgent，拿到结果 URL 后，再拿着 Task 2 找 VideoGenAgent。
+
+4. 数据协议 (核心资产)
+
+为了保证前后端、Agent 之间不打架，必须定义严格的协议。
+
+任务定义 (Task Schema)
+code
+JSON
+download
+content_copy
+expand_less
+{
+  "task_id": "step_02",
+  "action": "image_to_video",
+  "dependency": ["step_01"],
+  "params": {
+    "source_image": "$step_01.output.url",  // 动态引用
+    "motion_scale": 5,
+    "prompt": "camera pan right"
+  }
+}
+记忆体结构 (Memory Schema)
+
+这是“设计师 Agent”的灵魂。不能只记聊天记录，要记资产状态。
+
+code
+JSON
+download
+content_copy
+expand_less
+{
+  "session_id": "project_alpha",
+  "history": [
+    {"role": "user", "content": "把这只猫变蓝"},
+    {"role": "assistant", "content": "已修改", "assets": ["img_002"]}
+  ],
+  "assets": {
+    "img_001": {"type": "image", "url": "...", "meta": {"prompt": "cat"}},
+    "img_002": {"type": "image", "url": "...", "meta": {"parent": "img_001", "action": "recolor"}}
+  }
+}
+5. 开发路线图 (Roadmap)
+Phase 1: 最小闭环 (The Skeleton) - 预计 1 周
+
+目标：跑通“对话 -> 规划 -> 单步执行 -> 反馈”。
+
+实现：
+
+Electron 简单的 Chat UI。
+
+Python 后端：实现 Planner (解析意图) + 一个简单的 Tool (生图)。
+
+忽略并发，忽略记忆，只做单次指令。
+
+Phase 2: 记忆与多轮对话 (The Memory) - 预计 1.5 周
+
+目标：让 AI 听懂“修改它”。
+
+实现：
+
+引入 Memory 模块。
+
+Planner prompt 优化：“分析用户指令是否引用了历史资产”。
+
+实现“修改图片”工具 (Inpainting/Img2Img)。
+
+Phase 3: 多步工作流 (The Chain) - 预计 2 周
+
+目标：处理“先画图再转视频”这种复合任务。
+
+实现：
+
+完善 Scheduler，支持依赖解析 (Dependency Resolution)。
+
+接入 Video 生成 API。
+
+前端实现“步骤条”显示。
+
+Phase 4: 专家调优 (The Polish) - 长期迭代
+
+目标：提升画图质量。
+
+实现：
+
+给 ImageGenAgent 增加 Prompt Enhancer (自动把“一只猫”扩写成“一只超高清、8k、电影光效的猫”)。
+
+增加 ComfyUI 本地连接支持。
+
+6. 避坑指南 (重要)
+
+不要过度依赖 Agno 的 "Team"：Agno 的 Team 适合聊天（辩论、头脑风暴），不适合干活。干活要用明确的 Code Logic 调度，把 Agno 仅作为“大脑”来生成指令。
+
+前端不要只做 Chat：设计师需要Canvas。参考 Miro 或 Figma 的逻辑，生成的图片应该是一个个可以拖拽的卡片，而不是流式文字里的图片。
+
+API 成本：视频生成非常贵（Fal/Replicate 按秒计费）。开发阶段务必做 Mock Mode (模拟模式)，不然调试一天几百块没了。
+
+这就是一份完全不顺着你说，而是基于落地可行性和商业价值考量的架构规划。
+
+你可以直接拿这份文档去建立你的 Github Repo 了。

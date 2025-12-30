@@ -4,10 +4,12 @@ import { ReActStep, ToolCall, ToolResult, ToolParameter } from './types'
 import { allTools, getToolByName } from './tools'
 import { useMcpStore } from '@/stores/mcp'
 import { callTool, formatToolResult, getOpenAIFunctions } from '@/lib/mcp/tools'
+import { parseChatCompletionStream } from '@/lib/llm/tool-calls'
 
 export interface ReActConfig {
   maxIterations: number
   onThought?: (thought: string) => void
+  onContent?: (content: string) => void
   onPlan?: (plan: string[]) => void
   onAction?: (action: string, params: Record<string, any>) => void
   onObservation?: (observation: string) => void
@@ -51,6 +53,43 @@ export class ReActAgent {
     }
   }
 
+  async runWithMessages(options: {
+    openai: OpenAI
+    model: string
+    messages: any[]
+    tools?: OpenAI.Chat.Completions.ChatCompletionTool[]
+    temperature?: number
+    topP?: number
+    maxIterations?: number
+    abortSignal?: AbortSignal
+  }): Promise<string> {
+    this.steps = []
+    this.currentIteration = 0
+    this.toolCallCounter = 0
+    this.stopped = false
+    this.toolCallHistory = []
+
+    this.openai = options.openai
+    this.model = options.model
+
+    const tools = options.tools || []
+    const { finalAnswer } = await this.runToolLoop({
+      openai: options.openai,
+      model: options.model,
+      messages: options.messages,
+      tools,
+      temperature: options.temperature,
+      topP: options.topP,
+      maxIterations: options.maxIterations ?? this.config.maxIterations,
+      abortSignal: options.abortSignal,
+      extractThinkBlocks: false,
+      suppressContentAfterToolCall: true,
+      clearContentOnFirstToolCall: true,
+    })
+
+    return finalAnswer
+  }
+
   async run(userInput: string, context?: string, attachments?: { imageUrls?: string[] }): Promise<string> {
     this.steps = []
     this.currentIteration = 0
@@ -89,30 +128,87 @@ export class ReActAgent {
       { role: 'user', content: initialUserContent },
     ]
 
+    const { finalAnswer } = await this.runToolLoop({
+      openai,
+      model: aiConfig.model,
+      messages,
+      tools,
+      temperature: aiConfig.temperature,
+      topP: aiConfig.topP,
+      maxIterations: this.config.maxIterations,
+      abortSignal: undefined,
+      extractThinkBlocks: true,
+      suppressContentAfterToolCall: false,
+      clearContentOnFirstToolCall: false,
+    })
+
+    if (this.stopped) return ''
+
+    const summarized = await this.generateSummary(
+      openai,
+      aiConfig.model,
+      userInput,
+      plan,
+      this.toolCallHistory,
+      finalAnswer
+    )
+
+    return summarized || finalAnswer
+  }
+
+  private async runToolLoop(options: {
+    openai: OpenAI
+    model: string
+    messages: any[]
+    tools: OpenAI.Chat.Completions.ChatCompletionTool[]
+    temperature?: number
+    topP?: number
+    maxIterations: number
+    abortSignal?: AbortSignal
+    extractThinkBlocks: boolean
+    suppressContentAfterToolCall: boolean
+    clearContentOnFirstToolCall: boolean
+  }): Promise<{ finalAnswer: string; messages: any[] }> {
+    let messages = options.messages
     let finalAnswer = ''
 
-    while (this.currentIteration < this.config.maxIterations) {
-      if (this.stopped) return ''
+    while (this.currentIteration < options.maxIterations) {
+      if (this.stopped) return { finalAnswer: '', messages }
+      if (options.abortSignal?.aborted) return { finalAnswer: '', messages }
 
       this.currentIteration++
       this.config.onIterationStart?.(this.currentIteration)
 
-      const { content, toolCalls, thought } = await this.callModel(openai, aiConfig.model, messages, tools, aiConfig.temperature, aiConfig.topP)
-      if (this.stopped) return ''
-
-      // 只展示“推理/思考”通道，避免把最终输出/Markdown 当成思考过程导致 UI 出现一长串标题
-      if (thought) {
-        this.config.onThought?.(thought)
-      }
+      const { content, toolCalls, thought } = await this.callModel(
+        options.openai,
+        options.model,
+        messages,
+        options.tools,
+        options.temperature,
+        options.topP,
+        {
+          abortSignal: options.abortSignal,
+          extractThinkBlocks: options.extractThinkBlocks,
+          suppressContentAfterToolCall: options.suppressContentAfterToolCall,
+          clearContentOnFirstToolCall: options.clearContentOnFirstToolCall,
+        }
+      )
+      if (this.stopped) return { finalAnswer: '', messages }
+      if (options.abortSignal?.aborted) return { finalAnswer: '', messages }
 
       if (!toolCalls.length) {
         finalAnswer = content?.trim() || '任务执行完成。'
         break
       }
 
+      if (options.clearContentOnFirstToolCall) {
+        this.config.onContent?.('')
+      }
+
       const toolResults: any[] = []
       for (const toolCall of toolCalls) {
-        if (this.stopped) return ''
+        if (this.stopped) return { finalAnswer: '', messages }
+        if (options.abortSignal?.aborted) return { finalAnswer: '', messages }
 
         const toolName = toolCall.function.name
         const params = safeParseJson(toolCall.function.arguments)
@@ -146,22 +242,11 @@ export class ReActAgent {
       ]
     }
 
-    if (!finalAnswer && this.currentIteration >= this.config.maxIterations) {
+    if (!finalAnswer && this.currentIteration >= options.maxIterations) {
       finalAnswer = '已达到最大迭代次数，任务可能未完全完成。'
     }
 
-    if (this.stopped) return ''
-
-    const summarized = await this.generateSummary(
-      openai,
-      aiConfig.model,
-      userInput,
-      plan,
-      this.toolCallHistory,
-      finalAnswer
-    )
-
-    return summarized || finalAnswer
+    return { finalAnswer, messages }
   }
 
   private buildSystemPrompt(): string {
@@ -236,9 +321,25 @@ export class ReActAgent {
     messages: any[],
     tools: OpenAI.Chat.Completions.ChatCompletionTool[],
     temperature?: number,
-    topP?: number
+    topP?: number,
+    options?: {
+      abortSignal?: AbortSignal
+      extractThinkBlocks?: boolean
+      suppressContentAfterToolCall?: boolean
+      clearContentOnFirstToolCall?: boolean
+    }
   ): Promise<{ content: string; thought: string; toolCalls: OpenAIToolCall[] }> {
-    this.abortController = new AbortController()
+    const controller = new AbortController()
+    this.abortController = controller
+
+    const externalAbortSignal = options?.abortSignal
+    const onAbort = () => {
+      try {
+        controller.abort()
+      } catch {}
+    }
+    if (externalAbortSignal?.aborted) onAbort()
+    externalAbortSignal?.addEventListener('abort', onAbort, { once: true })
 
     const requestParams: any = {
       model,
@@ -253,113 +354,67 @@ export class ReActAgent {
       requestParams.tool_choice = 'auto'
     }
 
-    const stream = await openai.chat.completions.create(requestParams, {
-      signal: this.abortController.signal,
-    }) as unknown as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>
+    try {
+      const stream = await openai.chat.completions.create(requestParams, {
+        signal: controller.signal,
+      }) as unknown as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>
 
-    let fullContent = ''
-    let thought = ''
-    const toolCalls: OpenAIToolCall[] = []
-    let legacyFunctionCallId: string | null = null
+      let thought = ''
+      let streamedContent = ''
+      const parsed = await parseChatCompletionStream(stream, {
+        abortSignal: controller.signal,
+        suppressContentAfterToolCall: Boolean(options?.suppressContentAfterToolCall),
+        clearContentOnFirstToolCall: Boolean(options?.clearContentOnFirstToolCall),
+        onReasoningDelta: (delta) => {
+          thought += delta
+          if (thought) this.config.onThought?.(thought)
+        },
+        onContentDelta: (delta) => {
+          streamedContent += delta
+          this.config.onContent?.(streamedContent)
+        },
+      })
 
-    for await (const chunk of stream) {
-      if (this.stopped) {
-        this.abortController.abort()
-        break
+      this.abortController = null
+      externalAbortSignal?.removeEventListener('abort', onAbort)
+
+      const extractThinkBlocks = options?.extractThinkBlocks !== false
+      const { content: cleanedContent, extractedThought } = extractThinkBlocks
+        ? stripThinkBlocks(parsed.content)
+        : { content: String(parsed.content || ''), extractedThought: '' }
+
+      const mergedThought = [parsed.reasoning, extractedThought].filter(Boolean).join('\n\n')
+
+      const normalizedToolCalls = parsed.toolCalls.filter(Boolean) as OpenAIToolCall[]
+      if (normalizedToolCalls.length > 0) {
+        return { content: cleanedContent, thought: mergedThought, toolCalls: normalizedToolCalls }
       }
 
-      const delta = chunk.choices[0]?.delta
-      if (!delta) continue
-
-      const thinkingContent = (delta as any)?.reasoning_content || ''
-      if (thinkingContent) {
-        thought += thinkingContent
+      // 兼容：从正文中解析 <tool_calls> JSON（适配不支持原生 tool call 的模型）
+      const parsedFromContent = parseToolCallsFromContent(cleanedContent)
+      if (parsedFromContent.length > 0) {
+        return { content: removeToolCallsBlock(cleanedContent), thought: mergedThought, toolCalls: parsedFromContent }
       }
 
-      if (delta.content) {
-        fullContent += delta.content
-      }
-
-      if (delta.tool_calls) {
-        for (const toolCall of delta.tool_calls) {
-          const index = toolCall.index || 0
-          if (!toolCalls[index]) {
-            toolCalls[index] = {
-              id: toolCall.id || '',
-              type: 'function',
-              function: {
-                name: toolCall.function?.name || '',
-                arguments: '',
-              },
-            }
-          }
-          if (toolCall.function?.arguments) {
-            toolCalls[index].function.arguments += toolCall.function.arguments
-          }
-          if (toolCall.id) {
-            toolCalls[index].id = toolCall.id
-          }
-          if (toolCall.function?.name) {
-            toolCalls[index].function.name = toolCall.function.name
-          }
+      // 兜底：如果模型“口头说要写文件/用工具”但没发 tool calls，则再走一轮“结构化工具提取”
+      if (shouldSynthesizeToolCalls(cleanedContent)) {
+        const synthesized = await this.synthesizeToolCalls(openai, model, messages, cleanedContent, tools, temperature)
+        if (synthesized.length > 0) {
+          return { content: removeToolCallsBlock(cleanedContent), thought: mergedThought, toolCalls: synthesized }
         }
       }
 
-      // 兼容：一些 OpenAI 兼容服务端仍返回 legacy `function_call`（单个调用）而不是 `tool_calls`
-      const legacy = (delta as any)?.function_call
-      if (legacy) {
-        const index = 0
-        if (!legacyFunctionCallId) {
-          legacyFunctionCallId = `legacy-fc-${Date.now()}-${Math.random().toString(36).slice(2)}`
-        }
-        if (!toolCalls[index]) {
-          toolCalls[index] = {
-            id: legacyFunctionCallId,
-            type: 'function',
-            function: {
-              name: String(legacy?.name || ''),
-              arguments: '',
-            },
-          }
-        }
-        if (legacy?.name && !toolCalls[index].function.name) {
-          toolCalls[index].function.name = String(legacy.name)
-        }
-        if (legacy?.arguments) {
-          toolCalls[index].function.arguments += String(legacy.arguments)
-        }
+      return { content: cleanedContent, thought: mergedThought, toolCalls: [] }
+    } catch (error) {
+      this.abortController = null
+      externalAbortSignal?.removeEventListener('abort', onAbort)
+
+      if (controller.signal.aborted || externalAbortSignal?.aborted || this.stopped) {
+        return { content: '', thought: '', toolCalls: [] }
       }
 
-      // 只在模型提供 reasoning_content 时更新“思考”展示；不要用内容流填充思考区
-      if (thought) {
-        this.config.onThought?.(thought)
-      }
+      throw error
     }
-
-    this.abortController = null
-    const { content: cleanedContent, extractedThought } = stripThinkBlocks(fullContent)
-    const mergedThought = [thought, extractedThought].filter(Boolean).join('\n\n')
-
-    const normalizedToolCalls = toolCalls.filter(Boolean)
-    if (normalizedToolCalls.length > 0) {
-      return { content: cleanedContent, thought: mergedThought, toolCalls: normalizedToolCalls }
-    }
-
-    // 兼容：从正文中解析 <tool_calls> JSON（适配不支持原生 tool call 的模型）
-    const parsedFromContent = parseToolCallsFromContent(cleanedContent)
-    if (parsedFromContent.length > 0) {
-      return { content: removeToolCallsBlock(cleanedContent), thought: mergedThought, toolCalls: parsedFromContent }
-    }
-
-    // 兜底：如果模型“口头说要写文件/用工具”但没发 tool calls，则再走一轮“结构化工具提取”
-    if (shouldSynthesizeToolCalls(cleanedContent)) {
-      const synthesized = await this.synthesizeToolCalls(openai, model, messages, cleanedContent, tools, temperature)
-      if (synthesized.length > 0) {
-        return { content: removeToolCallsBlock(cleanedContent), thought: mergedThought, toolCalls: synthesized }
-      }
-    }
-
-    return { content: cleanedContent, thought: mergedThought, toolCalls: [] }
   }
 
   private async synthesizeToolCalls(

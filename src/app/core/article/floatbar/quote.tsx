@@ -13,10 +13,6 @@ export default function QuoteToChat({ value }: { editor?: Vditor; value?: string
     if (!value?.trim()) return
     if (!activeFilePath) return
 
-    try {
-      emitter.emit('editor-highlight-selection')
-    } catch {}
-
     emitter.emit('chat-add-snippet', {
       filePath: activeFilePath,
       snippet: value,

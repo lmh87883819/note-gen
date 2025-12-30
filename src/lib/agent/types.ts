@@ -58,6 +58,12 @@ export interface AgentState {
     id: string
     toolName: string
     params: Record<string, any>
+    backend?: {
+      baseUrl: string
+      sessionId: string
+      runId: string
+      taskId: number
+    }
   }
   confirmationHistory: ConfirmationRecord[] // 确认操作的历史记录
   lastError?: string

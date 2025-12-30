@@ -162,29 +162,6 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
-.md-highlight-layer {
-  position: absolute;
-  left: 0;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  pointer-events: none;
-  overflow: hidden;
-  z-index: 1;
-}
-
-.md-highlight-layer__inner {
-  position: absolute;
-  left: 0;
-  top: 0;
-  will-change: transform;
-}
-
-.md-highlight-rect {
-  position: absolute;
-  border-radius: 4px;
-}
-
 .vditor.show-line-numbers {
   .md-line-gutter {
     display: block;

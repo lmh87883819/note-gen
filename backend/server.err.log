@@ -1,0 +1,16 @@
+INFO:     Started server process [25904]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8060 (Press CTRL+C to quit)
+INFO:backend:editor_run_stream called: session_id=test-parse workspace_root=C:\Users\Administrator\Desktop\文章工作�\ufffd active_file_path=C:\Users\Administrator\Desktop\文章工作区\123.md msg_len=10
+INFO:backend:editor planner input: active_file_path=C:\Users\Administrator\Desktop\文章工作区\123.md
+INFO:httpx:HTTP Request: POST https://grsaiapi.com/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://os-api.agno.com/telemetry/runs "HTTP/2 201 Created"
+INFO:backend:editor plan steps=5
+INFO:httpx:HTTP Request: POST https://grsaiapi.com/v1/chat/completions "HTTP/1.1 200 OK"
+WARNING:asyncio:socket.send() raised exception.
+WARNING:asyncio:socket.send() raised exception.
+WARNING:asyncio:socket.send() raised exception.
+WARNING:asyncio:socket.send() raised exception.
+
+ERROR conda.cli.main_run:execute(125): `conda run uvicorn backend.main:app --host 127.0.0.1 --port 8060 --log-level info` failed. (See above for error)

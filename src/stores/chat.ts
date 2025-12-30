@@ -173,6 +173,40 @@ const useChatStore = create<ChatState>((set, get) => ({
     const pending = agentState.pendingConfirmation
     if (!pending) return
 
+    // Backend-driven confirmation (B2): forward decision to backend instead of local promise resolver.
+    const backend = (pending as any)?.backend as ({ baseUrl: string; sessionId: string; runId: string; taskId: number } | undefined)
+    if (backend?.baseUrl && backend?.sessionId && backend?.runId && backend?.taskId) {
+      try {
+        void fetch(`${backend.baseUrl.replace(/\/$/, '')}/api/editor/confirm`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: backend.sessionId,
+            run_id: backend.runId,
+            task_id: backend.taskId,
+            confirmed,
+          }),
+        })
+      } catch {}
+
+      const confirmationRecord: ConfirmationRecord = {
+        toolName: pending.toolName,
+        params: pending.params,
+        status: confirmed ? 'confirmed' : 'cancelled',
+        timestamp: Date.now(),
+      }
+
+      set({
+        agentState: {
+          ...agentState,
+          phase: 'executing',
+          pendingConfirmation: undefined,
+          confirmationHistory: [...agentState.confirmationHistory, confirmationRecord],
+        },
+      })
+      return
+    }
+
     const resolve = confirmationResolvers.get(pending.id)
     confirmationResolvers.delete(pending.id)
 

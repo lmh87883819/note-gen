@@ -4,7 +4,7 @@ import asyncio
 import os
 import re
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional, Set
+from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional, Set, Tuple
 
 from agno.tools import Function
 
@@ -25,9 +25,13 @@ from .memory import MemoryStore
 
 
 EventEmitter = Callable[[Dict[str, Any]], Awaitable[None]]
+ConfirmCallback = Callable[[PlannedTask, Dict[str, Any]], Awaitable[bool]]
+
+CONFIRM_TASKS: Set[ToolName] = {ToolName.WRITE_FILE, ToolName.APPLY_PATCH, ToolName.REPLACE_LINES}
 
 _REF_RE = re.compile(r"^\$step_(\d+)\.(.+)$")
 _GEN_RE = re.compile(r"^<GENERATED>-(\d+)(?:-(.+))?$")
+_GEN_TOKEN_RE = re.compile(r"<GENERATED>-(\d+)(?:-([a-zA-Z0-9_]+))?")
 
 
 def _get_by_path(obj: Any, path: str) -> Any:
@@ -92,21 +96,41 @@ class ToolPlanExecutor:
         if not isinstance(arg_value, str):
             return arg_value
         raw = arg_value.strip()
-        gen = _GEN_RE.match(raw)
-        if not gen:
+        if "<GENERATED>-" not in raw:
             return raw
-        dep_id = int(gen.group(1))
-        field = gen.group(2)
-        if dep_id not in allowed_dep_ids:
-            raise ValueError(f"Reference {raw} requires dep_id in dep list: {sorted(allowed_dep_ids)}")
-        output = self.step_memory.get(dep_id)
-        if output is None:
-            raise ValueError(f"Dependency task {dep_id} not found or not completed")
-        if not field or field == "asset_id":
-            return output.asset_id or raw
-        if field == "asset_uri":
-            return output.asset_uri or raw
-        return raw
+
+        def resolve_token(dep_id: int, field: Optional[str]) -> str:
+            if dep_id not in allowed_dep_ids:
+                raise ValueError(f"Reference <GENERATED>-{dep_id} requires dep_id in dep list: {sorted(allowed_dep_ids)}")
+            output = self.step_memory.get(dep_id)
+            if output is None:
+                raise ValueError(f"Dependency task {dep_id} not found or not completed")
+            content = None
+            if isinstance(output.data, dict):
+                content = output.data.get("content")
+
+            if not field:
+                return str(content or output.asset_uri or output.asset_id or f"<GENERATED>-{dep_id}")
+            if field in {"asset_id", "id"}:
+                return str(output.asset_id or f"<GENERATED>-{dep_id}-{field}")
+            if field in {"asset_uri", "uri", "url"}:
+                return str(output.asset_uri or f"<GENERATED>-{dep_id}-{field}")
+            if field in {"content", "text"}:
+                return str(content if content is not None else f"<GENERATED>-{dep_id}-{field}")
+            return f"<GENERATED>-{dep_id}-{field}"
+
+        # Entire-string placeholder
+        gen = _GEN_RE.match(raw)
+        if gen:
+            return resolve_token(int(gen.group(1)), gen.group(2))
+
+        # Embedded placeholders inside a larger string (common for prompts).
+        def repl(match: re.Match[str]) -> str:
+            dep_id = int(match.group(1))
+            field = match.group(2)
+            return resolve_token(dep_id, field)
+
+        return _GEN_TOKEN_RE.sub(repl, raw)
 
     def _resolve_args(self, value: Any, *, allowed_dep_ids: Set[int], step_results: Dict[int, ExecutedStep]) -> Any:
         value = self._resolve_argument(value, allowed_dep_ids=allowed_dep_ids)
@@ -127,6 +151,12 @@ class ToolPlanExecutor:
         if artifact_type == ToolArtifactType.VIDEO:
             asset_prefix = "vid"
             asset_type = AssetType.VIDEO
+        elif artifact_type == ToolArtifactType.FILE:
+            asset_prefix = "file"
+            asset_type = AssetType.FILE
+        elif artifact_type == ToolArtifactType.TEXT:
+            asset_prefix = "txt"
+            asset_type = AssetType.TEXT
 
         asset_id = self._memory.next_asset_id(session_id, prefix=asset_prefix)
         self._memory.add_asset(session_id, Asset(id=asset_id, type=asset_type, uri=uri, meta=meta))
@@ -138,6 +168,7 @@ class ToolPlanExecutor:
         session_id: str,
         plan: TaskPlan,
         emit: Optional[EventEmitter] = None,
+        confirm: Optional[ConfirmCallback] = None,
     ) -> AsyncIterator[Dict[str, Any]]:
         q: "asyncio.Queue[Dict[str, Any] | None]" = asyncio.Queue()
 
@@ -152,7 +183,7 @@ class ToolPlanExecutor:
 
         async def worker() -> None:
             try:
-                result = await self.run_async(session_id=session_id, plan=plan, emit=forward)
+                result = await self.run_async(session_id=session_id, plan=plan, emit=forward, confirm=confirm)
                 await q.put({"type": "run_completed", "result": result.model_dump(mode="json")})
             except Exception as error:  # noqa: BLE001
                 await q.put({"type": "error", "error": str(error)})
@@ -175,6 +206,7 @@ class ToolPlanExecutor:
         session_id: str,
         plan: TaskPlan,
         emit: Optional[EventEmitter] = None,
+        confirm: Optional[ConfirmCallback] = None,
     ) -> RunResult:
         async def _noop(_event: Dict[str, Any]) -> None:
             return None
@@ -230,18 +262,41 @@ class ToolPlanExecutor:
                     step_results=step_results,
                 )
 
+                # Human-in-the-loop confirmation for destructive steps
+                if confirm is not None and t.task in CONFIRM_TASKS:
+                    ok = await confirm(t, resolved_args)
+                    if not ok:
+                        running.status = StepStatus.FAILED
+                        running.args = resolved_args
+                        running.error = "Cancelled by user"
+                        pending.pop(t.id, None)
+                        await emit(
+                            {
+                                "type": "progress",
+                                "task_id": t.id,
+                                "status": "failed",
+                                "task": t.task,
+                                "error": running.error,
+                            }
+                        )
+                        continue
+
                 for attempt in range(self._config.max_retries + 1):
                     try:
                         tool_result = await tool.entrypoint(**resolved_args)
                         parsed = ToolResult.model_validate(tool_result)
-                        if not parsed.results or not parsed.results[0].url:
-                            raise ValueError(f"Tool {t.task} returned no result url: {tool_result}")
+                        if not parsed.results:
+                            raise ValueError(f"Tool {t.task} returned no results: {tool_result}")
                         artifact = parsed.results[0]
-                        url = str(artifact.url)
+                        url = str(artifact.url or "")
+                        content = str(artifact.content) if artifact.content is not None else None
+                        if not url and not content:
+                            raise ValueError(f"Tool {t.task} returned neither url nor content: {tool_result}")
+                        uri = url or f"memory://generated/{t.id}"
 
                         asset_id = self._register_asset(
                             session_id=session_id,
-                            uri=url,
+                            uri=uri,
                             meta={
                                 "tool": t.task,
                                 "artifact_type": artifact.type,
@@ -250,8 +305,12 @@ class ToolPlanExecutor:
                         )
                         output = StepOutput(
                             asset_id=asset_id,
-                            asset_uri=url,
-                            data={"tool_result": parsed.model_dump(mode="json")},
+                            asset_uri=uri,
+                            data={
+                                "tool_result": parsed.model_dump(mode="json"),
+                                "content": content,
+                                "url": uri,
+                            },
                         )
 
                         running.status = StepStatus.COMPLETED

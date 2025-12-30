@@ -4,10 +4,42 @@ import os
 import sys
 from pathlib import Path
 import asyncio
+import logging
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+
+# Minimal .env loader (no extra deps). Looks for `backend/.env` and repo-root `.env`.
+def _maybe_load_dotenv() -> None:
+    def load_file(path: Path) -> None:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return
+        except Exception:
+            return
+
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip("'").strip('"')
+            if not key or not value:
+                continue
+            os.environ.setdefault(key, value)
+
+    here = Path(__file__).resolve()
+    load_file(here.parent / ".env")
+    load_file(here.parent.parent / ".env")
+
+
+_maybe_load_dotenv()
 
 # 允许两种启动方式：
 # 1) 推荐：在项目根目录执行 `python -m backend.main` 或 `uvicorn backend.main:app`
@@ -17,12 +49,37 @@ if __package__ in (None, ""):
 
 from backend.agents import build_domain_agents, get_router_agent
 from backend.agents import get_guard_agent
+from backend.agents.editor_planner import build_editor_planner_input, get_editor_planner_agent
 from backend.data_types import RunResult, SessionMemory, TaskPlan
 from backend.executor import ToolPlanExecutor
 from backend.memory import MemoryStore
 from backend.orchestrator import Orchestrator
 from backend.tools import build_tools
 app = FastAPI(title="My Designer Agent Backend", version="0.1.0")
+
+logger = logging.getLogger("backend")
+if not logger.handlers:
+    logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+
+# CORS (dev-friendly; override via env CORS_ALLOW_ORIGINS="http://localhost:3456,http://127.0.0.1:3456")
+_cors_env = os.getenv("CORS_ALLOW_ORIGINS", "").strip()
+if _cors_env:
+    _origins = [o.strip().rstrip("/") for o in _cors_env.split(",") if o.strip()]
+else:
+    _origins = [
+        "http://localhost:3456",
+        "http://127.0.0.1:3456",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_origins,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class UserRequest(BaseModel):
@@ -35,9 +92,27 @@ class RunRequest(BaseModel):
     plan: TaskPlan | None = None
 
 
+class EditorRunRequest(BaseModel):
+    session_id: str = "default"
+    message: str
+    workspace_root: str | None = None
+    active_file_path: str | None = None
+    active_content: str | None = None
+    plan: TaskPlan | None = None
+
+
+class ConfirmRequest(BaseModel):
+    session_id: str = "default"
+    run_id: str
+    task_id: int
+    confirmed: bool
+
+
 planner = None
 memory_store = MemoryStore()
 orchestrator = None
+editor_planner = None
+pending_confirms: dict[tuple[str, str, int], asyncio.Future[bool]] = {}
 
 
 def get_planner():
@@ -45,6 +120,13 @@ def get_planner():
     if planner is None:
         planner = get_router_agent()
     return planner
+
+
+def get_editor_planner():
+    global editor_planner
+    if editor_planner is None:
+        editor_planner = get_editor_planner_agent()
+    return editor_planner
 
 
 def get_orchestrator() -> Orchestrator:
@@ -64,6 +146,11 @@ def get_orchestrator() -> Orchestrator:
 
 @app.get("/health")
 def health() -> dict:
+    return {"ok": True}
+
+
+@app.get("/api/editor/ping")
+def editor_ping() -> dict:
     return {"ok": True}
 
 
@@ -180,6 +267,153 @@ async def run_stream(request: RunRequest) -> StreamingResponse:
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
         },
+    )
+
+
+@app.post("/api/editor/confirm")
+async def editor_confirm(request: ConfirmRequest) -> dict:
+    key = (request.session_id, request.run_id, request.task_id)
+    fut = pending_confirms.get(key)
+    if fut is None:
+        raise HTTPException(status_code=404, detail="No pending confirmation for this run/task")
+    if fut.done():
+        return {"ok": True, "already": True}
+    fut.set_result(bool(request.confirmed))
+    return {"ok": True}
+
+
+@app.post("/api/editor/run_stream")
+async def editor_run_stream(request: EditorRunRequest) -> StreamingResponse:
+    import json
+    import time
+    from pathlib import Path
+
+    async def event_stream():
+        run_id = f"run-{int(time.time() * 1000)}"
+        try:
+            logger.info(
+                "editor_run_stream called: session_id=%s workspace_root=%s active_file_path=%s msg_len=%s",
+                request.session_id,
+                request.workspace_root,
+                request.active_file_path,
+                len(request.message or ""),
+            )
+            yield f"data: {json.dumps({'type': 'run_started', 'run_id': run_id}, ensure_ascii=False)}\n\n"
+
+            plan = request.plan
+            if plan is None:
+                # Normalize active_file_path: if relative and workspace_root provided, treat as relative to workspace_root.
+                active_file_path = request.active_file_path
+                if active_file_path and request.workspace_root:
+                    try:
+                        p = Path(active_file_path)
+                        if not p.is_absolute():
+                            active_file_path = str(Path(request.workspace_root) / active_file_path)
+                    except Exception:
+                        pass
+                logger.info("editor planner input: active_file_path=%s", active_file_path)
+                planner_input = build_editor_planner_input(
+                    session_id=request.session_id,
+                    message=request.message,
+                    workspace_root=request.workspace_root,
+                    active_file_path=active_file_path,
+                    active_content=request.active_content,
+                )
+                planner_out = await asyncio.to_thread(get_editor_planner().run, planner_input)
+                content = getattr(planner_out, "content", None)
+                if isinstance(content, TaskPlan):
+                    plan = content
+                elif isinstance(content, list):
+                    plan = TaskPlan.model_validate(content)
+                elif isinstance(content, str):
+                    # Be tolerant: some models wrap plan as {"tasks":[...]} or return JSON as a string.
+                    try:
+                        parsed = json.loads(content)
+                    except Exception as e:  # noqa: BLE001
+                        raise RuntimeError(f"Invalid editor planner output (not JSON): {content!r}") from e
+
+                    if isinstance(parsed, dict):
+                        candidate = parsed.get("tasks") or parsed.get("plan") or parsed.get("root")
+                        if isinstance(candidate, list):
+                            plan = TaskPlan.model_validate(candidate)
+                        elif isinstance(candidate, TaskPlan):
+                            plan = candidate
+                        else:
+                            raise RuntimeError(f"Invalid editor planner output dict: {parsed!r}")
+                    elif isinstance(parsed, list):
+                        plan = TaskPlan.model_validate(parsed)
+                    else:
+                        raise RuntimeError(f"Invalid editor planner output JSON type: {type(parsed).__name__}")
+                else:
+                    raise RuntimeError(f"Invalid editor planner output: {content!r}")
+
+            yield f"data: {json.dumps({'type': 'plan', 'run_id': run_id, 'plan': plan.model_dump(mode='json')}, ensure_ascii=False)}\n\n"
+            logger.info("editor plan steps=%s", len(plan.root))
+
+            executor = ToolPlanExecutor(tools=build_tools(), memory=memory_store)
+
+            q: "asyncio.Queue[str | None]" = asyncio.Queue()
+
+            async def push_event(event: dict) -> None:
+                event = {**event, "run_id": run_id}
+                await q.put(f"data: {json.dumps(event, ensure_ascii=False)}\n\n")
+
+            async def confirm_cb(task, resolved_args):
+                key = (request.session_id, run_id, int(task.id))
+                fut = asyncio.get_running_loop().create_future()
+                pending_confirms[key] = fut
+                try:
+                    await push_event(
+                        {
+                            "type": "awaiting_confirmation",
+                            "task_id": int(task.id),
+                            "task": task.task,
+                            "args": resolved_args,
+                        }
+                    )
+                    return await fut
+                finally:
+                    pending_confirms.pop(key, None)
+
+            async def worker():
+                try:
+                    result = await executor.run_async(
+                        session_id=request.session_id,
+                        plan=plan,
+                        emit=push_event,
+                        confirm=confirm_cb,
+                    )
+                    await push_event({"type": "run_completed", "result": result.model_dump(mode="json")})
+                except Exception as e:  # noqa: BLE001
+                    logger.exception("editor_run_stream worker error")
+                    await q.put(
+                        "event: error\n"
+                        f"data: {json.dumps({'type': 'error', 'error': str(e), 'run_id': run_id}, ensure_ascii=False)}\n\n"
+                    )
+                finally:
+                    await q.put(None)
+
+            worker_task = asyncio.create_task(worker())
+            try:
+                while True:
+                    item = await q.get()
+                    if item is None:
+                        break
+                    yield item
+            finally:
+                await worker_task
+
+            yield "event: done\ndata: {\"type\":\"done\"}\n\n"
+        except Exception as error:
+            yield (
+                "event: error\n"
+                f"data: {json.dumps({'type': 'error', 'error': str(error), 'run_id': run_id}, ensure_ascii=False)}\n\n"
+            )
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 

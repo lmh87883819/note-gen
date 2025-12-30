@@ -13,6 +13,15 @@ class ToolName(str, Enum):
     IMAGE_TO_VIDEO = "image_to_video"  # 图生视频
     UPSCALE_IMAGE = "upscale_image"  # 放大图片
     MODIFY_IMAGE = "modify_image"  # 局部重绘
+    # --- Editor / Filesystem ---
+    READ_FILE = "read_file"  # 读文件
+    WRITE_FILE = "write_file"  # 写文件（覆盖）
+    LIST_FILES = "list_files"  # 列目录/文件
+    GENERATE_TEXT = "generate_text"  # 文本生成（LLM）
+    DIFF_PREVIEW = "diff_preview"  # 生成 diff 预览
+    VERIFY_CONTAINS = "verify_contains"  # 验证内容包含（断言）
+    REPLACE_LINES = "replace_lines"  # 按行替换（精确编辑）
+    APPLY_PATCH = "apply_patch"  # 应用 unified diff patch
 
 
 # 2. JARVIS 风格任务规划结构（parse_task 输出）
@@ -37,6 +46,8 @@ class TaskPlan(RootModel[List[PlannedTask]]):
 class AssetType(str, Enum):
     IMAGE = "image"
     VIDEO = "video"
+    FILE = "file"
+    TEXT = "text"
 
 
 class Asset(BaseModel):

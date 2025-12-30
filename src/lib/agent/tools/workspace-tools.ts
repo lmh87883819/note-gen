@@ -120,15 +120,6 @@ export const replaceCurrentArticleLinesTool: Tool = {
         : await readTextFile(resolved.path, { baseDir: resolved.baseDir })
       verifyLength = text.length
     } catch {}
-    try {
-      emitter.emit('editor-ai-applied', {
-        filePath: activeFilePath,
-        startLine: s,
-        endLine: e,
-        content: replacement,
-      })
-    } catch {}
-
     return {
       success: true,
       data: {
@@ -165,15 +156,6 @@ export const updateArticleTool: Tool = {
     }
     store.setCurrentArticle(content)
     await store.saveCurrentArticle(content)
-
-    try {
-      emitter.emit('editor-ai-applied', {
-        filePath: activeFilePath,
-        startLine: 1,
-        endLine: Math.max(1, content.split('\n').length),
-        content,
-      })
-    } catch {}
 
     const workspace = await getWorkspacePath()
     const resolved = await getFilePathOptions(activeFilePath)

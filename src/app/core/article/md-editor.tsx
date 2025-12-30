@@ -21,7 +21,6 @@ import { open } from '@tauri-apps/plugin-shell'
 import { getWorkspacePath } from '@/lib/workspace'
 import { convertFileSrc } from "@tauri-apps/api/core";
 import useSettingStore from '@/stores/setting'
-import useChatStore from '@/stores/chat'
 import { uploadImage } from '@/lib/imageHosting'
 import FloatBar from './floatbar'
 import { createToolbarConfig } from './toolbar.config'
@@ -42,18 +41,6 @@ export function MdEditor() {
   const isCreatingFileRef = useRef(false)
   const activeFilePathRef = useRef(activeFilePath)
   const isReinitializingRef = useRef(false)
-  const pendingConfirmation = useChatStore(s => s.agentState.pendingConfirmation)
-  const highlightUiRef = useRef<{
-    pre: HTMLElement | null
-    wrapper: HTMLElement | null
-    layer: HTMLDivElement | null
-    inner: HTMLDivElement | null
-    cleanup: (() => void) | null
-  }>({ pre: null, wrapper: null, layer: null, inner: null, cleanup: null })
-  const highlightTimeoutRef = useRef<number | null>(null)
-  const lastSelectionRangeRef = useRef<Range | null>(null)
-  const aiPendingNeedleRef = useRef<string | null>(null)
-  const aiAppliedNeedleRef = useRef<string | null>(null)
 
   function getLang() {
     switch (currentLocale) {
@@ -63,6 +50,23 @@ export function MdEditor() {
         return 'zh_CN'
       default:
         return 'zh_CN'
+    }
+  }
+
+  function getSelectionFloatBarPosition(): {left: number, top: number} | null {
+    try {
+      const sel = window.getSelection()
+      if (!sel || sel.rangeCount === 0) return null
+      const r = sel.getRangeAt(0)
+      if (r.collapsed) return null
+      const rect = r.getBoundingClientRect()
+      if (!rect || (rect.width === 0 && rect.height === 0)) return null
+      const container = document.getElementById('article-editor')
+      if (!container) return null
+      const c = container.getBoundingClientRect()
+      return { left: rect.left - c.left, top: rect.top - c.top - 8 }
+    } catch {
+      return null
     }
   }
 
@@ -94,17 +98,8 @@ export function MdEditor() {
       },
       select: (value: string) => {
         setSelectedText(value)
-        setFloatBarPosition(vditor.getCursorPosition())
-        try {
-          const ctx = getEditorDomContext(vditor)
-          const sel = window.getSelection()
-          if (ctx && sel && sel.rangeCount > 0) {
-            const r = sel.getRangeAt(0)
-            if (!r.collapsed && ctx.pre.contains(r.commonAncestorContainer)) {
-              lastSelectionRangeRef.current = r.cloneRange()
-            }
-          }
-        } catch {}
+        const pos = getSelectionFloatBarPosition() || vditor.getCursorPosition()
+        setFloatBarPosition(pos)
       },
       unSelect: () => {
         resetSelectedText()
@@ -144,9 +139,7 @@ export function MdEditor() {
         editorRef.current = vditor
         setEditor(vditor);
         isReinitializingRef.current = false
-        try {
-          ensureHighlightLayer(vditor)
-        } catch {}
+
         // 切换记录编辑模式
         const editModeButtons = vditor.vditor.element.querySelectorAll('.edit-mode-button .vditor-hint button')
         editModeButtons.forEach(button => {
@@ -229,224 +222,6 @@ export function MdEditor() {
         }
       }
     })
-  }
-
-  function clearHighlightTimeout() {
-    if (highlightTimeoutRef.current) {
-      window.clearTimeout(highlightTimeoutRef.current)
-      highlightTimeoutRef.current = null
-    }
-  }
-
-  function getEditorDomContext(vditor: Vditor) {
-    const mode = vditor.getCurrentMode()
-    const pre = ((vditor as any)?.vditor?.[mode]?.element as HTMLElement | undefined) || null
-    const wrapper = (pre?.parentElement as HTMLElement | null) || null
-    if (!pre || !wrapper) return null
-    return { pre, wrapper }
-  }
-
-  function ensureHighlightLayer(vditor: Vditor) {
-    const ctx = getEditorDomContext(vditor)
-    if (!ctx) return null
-
-    // 模式切换后 pre 变化需要清理旧监听
-    const prev = highlightUiRef.current
-    if (prev.pre && prev.pre !== ctx.pre && prev.cleanup) {
-      prev.cleanup()
-      highlightUiRef.current = { pre: null, wrapper: null, layer: null, inner: null, cleanup: null }
-    }
-
-    if (highlightUiRef.current.pre === ctx.pre && highlightUiRef.current.layer && highlightUiRef.current.inner) {
-      return highlightUiRef.current
-    }
-
-    ctx.wrapper.style.position = ctx.wrapper.style.position || 'relative'
-
-    let layer = ctx.wrapper.querySelector(':scope > .md-highlight-layer') as HTMLDivElement | null
-    if (!layer) {
-      layer = document.createElement('div')
-      layer.className = 'md-highlight-layer'
-      layer.setAttribute('aria-hidden', 'true')
-      const inner = document.createElement('div')
-      inner.className = 'md-highlight-layer__inner'
-      layer.appendChild(inner)
-
-      // 放到最前（但在 gutter 之后也无所谓）
-      ctx.wrapper.insertBefore(layer, ctx.wrapper.firstChild)
-    }
-    const inner = layer.querySelector('.md-highlight-layer__inner') as HTMLDivElement | null
-
-    const sync = () => {
-      const current = highlightUiRef.current
-      if (!current?.inner || !current?.pre) return
-      current.inner.style.transform = `translate(${-current.pre.scrollLeft}px, ${-current.pre.scrollTop}px)`
-    }
-    ctx.pre.addEventListener('scroll', sync, { passive: true })
-
-    const ro = new ResizeObserver(() => {
-      sync()
-      try {
-        refreshHighlights(vditor)
-      } catch {}
-    })
-    ro.observe(ctx.wrapper)
-
-    const cleanup = () => {
-      ctx.pre.removeEventListener('scroll', sync as any)
-      ro.disconnect()
-      try {
-        layer?.remove()
-      } catch {}
-    }
-
-    highlightUiRef.current = { pre: ctx.pre, wrapper: ctx.wrapper, layer, inner, cleanup }
-    sync()
-    return highlightUiRef.current
-  }
-
-  function clearHighlights(id?: string) {
-    const inner = highlightUiRef.current.inner
-    if (!inner) return
-    clearHighlightTimeout()
-    if (!id) {
-      inner.innerHTML = ''
-      return
-    }
-    inner.querySelectorAll(`[data-highlight-id="${CSS.escape(id)}"]`).forEach(el => el.remove())
-  }
-
-  function computeContentRects(range: Range, wrapper: HTMLElement, pre: HTMLElement) {
-    const wrapperRect = wrapper.getBoundingClientRect()
-    const rects = Array.from(range.getClientRects())
-      .filter(r => r.width > 0 && r.height > 0)
-      .map(r => ({
-        left: r.left - wrapperRect.left + pre.scrollLeft,
-        top: r.top - wrapperRect.top + pre.scrollTop,
-        width: r.width,
-        height: r.height,
-      }))
-    return rects
-  }
-
-  function setHighlightRects(args: { id: string; color: string; rects: Array<{ left: number; top: number; width: number; height: number }> }) {
-    const inner = highlightUiRef.current.inner
-    if (!inner) return
-    clearHighlights(args.id)
-    for (const r of args.rects) {
-      const el = document.createElement('div')
-      el.className = 'md-highlight-rect'
-      el.setAttribute('data-highlight-id', args.id)
-      el.style.left = `${r.left}px`
-      el.style.top = `${r.top}px`
-      el.style.width = `${r.width}px`
-      el.style.height = `${r.height}px`
-      el.style.background = args.color
-      inner.appendChild(el)
-    }
-  }
-
-  function highlightRange(vditor: Vditor, id: string, color: string, range: Range) {
-    const ui = ensureHighlightLayer(vditor)
-    if (!ui?.pre || !ui?.wrapper) return
-    if (range.collapsed) return
-    if (!ui.pre.contains(range.commonAncestorContainer)) return
-    const rects = computeContentRects(range, ui.wrapper, ui.pre)
-    setHighlightRects({ id, color, rects })
-  }
-
-  function findTextRangeInElement(root: HTMLElement, needle: string): Range | null {
-    const query = String(needle || '')
-    if (!query.trim()) return null
-
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-    const nodes: Text[] = []
-    const starts: number[] = []
-    let full = ''
-
-    while (walker.nextNode()) {
-      const t = walker.currentNode as Text
-      const value = t.nodeValue || ''
-      if (!value) continue
-      if (full.length > 800000) break
-      starts.push(full.length)
-      nodes.push(t)
-      full += value
-    }
-
-    const idx = full.indexOf(query)
-    if (idx < 0) return null
-    const endIdx = idx + query.length
-
-    const locate = (pos: number) => {
-      for (let i = nodes.length - 1; i >= 0; i--) {
-        const start = starts[i]
-        const end = start + (nodes[i].nodeValue || '').length
-        if (pos >= start && pos <= end) {
-          return { node: nodes[i], offset: pos - start }
-        }
-      }
-      return null
-    }
-
-    const s = locate(idx)
-    const e = locate(endIdx)
-    if (!s || !e) return null
-
-    const r = document.createRange()
-    r.setStart(s.node, s.offset)
-    r.setEnd(e.node, e.offset)
-    return r
-  }
-
-  function highlightCurrentSelection(vditor: Vditor, id: string, color: string, opts?: { fallbackRange?: Range | null }) {
-    const ui = ensureHighlightLayer(vditor)
-    if (!ui?.pre || !ui?.wrapper) return
-    const sel = window.getSelection()
-    let range: Range | null = null
-    if (sel && sel.rangeCount > 0) {
-      const r = sel.getRangeAt(0)
-      if (!r.collapsed) range = r
-    }
-    if (!range && opts?.fallbackRange) range = opts.fallbackRange
-    if (!range || range.collapsed) return
-    if (!ui.pre.contains(range.commonAncestorContainer)) return
-    const rects = computeContentRects(range, ui.wrapper, ui.pre)
-    setHighlightRects({ id, color, rects })
-  }
-
-  function refreshHighlights(vditor: Vditor) {
-    ensureHighlightLayer(vditor)
-
-    const quoteRange = lastSelectionRangeRef.current
-    if (quoteRange) {
-      try {
-        highlightRange(vditor, 'quote-selection', 'rgba(255, 230, 150, 0.45)', quoteRange)
-      } catch {}
-    }
-
-    const ctx = getEditorDomContext(vditor)
-    if (ctx) {
-      if (aiPendingNeedleRef.current) {
-        const r = findTextRangeInElement(ctx.pre, aiPendingNeedleRef.current)
-        if (r) {
-          const rects = computeContentRects(r, ctx.wrapper, ctx.pre)
-          setHighlightRects({ id: 'ai-pending', color: 'rgba(160, 255, 160, 0.28)', rects })
-        } else {
-          clearHighlights('ai-pending')
-        }
-      }
-
-      if (aiAppliedNeedleRef.current) {
-        const r = findTextRangeInElement(ctx.pre, aiAppliedNeedleRef.current)
-        if (r) {
-          const rects = computeContentRects(r, ctx.wrapper, ctx.pre)
-          setHighlightRects({ id: 'ai-applied', color: 'rgba(120, 255, 120, 0.20)', rects })
-        } else {
-          clearHighlights('ai-applied')
-        }
-      }
-    }
   }
 
   function resetSelectedText() {
@@ -671,108 +446,36 @@ export function MdEditor() {
     }
   }
 
-  // 同步更新 activeFilePathRef
-  useEffect(() => {
-    activeFilePathRef.current = activeFilePath
-  }, [activeFilePath])
-
-  // 引用选区：持久高亮（淡黄色）
-  useEffect(() => {
-    const handler = () => {
-      const instance = editorRef.current || editor
-      if (!instance) return
-      highlightCurrentSelection(instance, 'quote-selection', 'rgba(255, 230, 150, 0.45)', { fallbackRange: lastSelectionRangeRef.current })
-    }
-    emitter.on('editor-highlight-selection', handler)
-    return () => {
-      emitter.off('editor-highlight-selection', handler)
-    }
-  }, [editor])
-
-  // Agent 等待确认时：把“将要改的区域”标成浅绿色，便于用户确认
-  useEffect(() => {
-    const instance = editorRef.current || editor
-    if (!instance) return
-    ensureHighlightLayer(instance)
-
-    if (!pendingConfirmation) {
-      aiPendingNeedleRef.current = null
-      clearHighlights('ai-pending')
-      return
-    }
-    if (pendingConfirmation.toolName !== 'replace_current_article_lines') return
-    if (!activeFilePathRef.current) return
-
-    const startLine = Number((pendingConfirmation as any)?.params?.startLine)
-    const endLine = Number((pendingConfirmation as any)?.params?.endLine)
-    if (!Number.isFinite(startLine) || !Number.isFinite(endLine)) return
-
-    const lines = String(currentArticle || '').split('\n')
-    const s = Math.max(1, Math.min(lines.length || 1, Math.floor(startLine)))
-    const e = Math.max(s, Math.min(lines.length || 1, Math.floor(endLine)))
-    const oldChunk = lines.slice(s - 1, e).join('\n').trim()
-    if (!oldChunk) return
-
-    const ctx = getEditorDomContext(instance)
-    if (!ctx) return
-
-    const needle = oldChunk.length > 1200 ? oldChunk.slice(0, 1200) : oldChunk
-    aiPendingNeedleRef.current = needle
-    const r = findTextRangeInElement(ctx.pre, needle)
-    if (!r) return
-    const rects = computeContentRects(r, ctx.wrapper, ctx.pre)
-    setHighlightRects({ id: 'ai-pending', color: 'rgba(160, 255, 160, 0.28)', rects })
-  }, [pendingConfirmation, editor, currentArticle])
-
-  // Agent 已应用改动：把新内容标成浅绿色一段时间
-  useEffect(() => {
-    const handler = (evt: unknown) => {
-      const payload = evt as { filePath?: string; content?: string }
-      if (!payload?.filePath) return
-      if (payload.filePath !== activeFilePathRef.current) return
-      const instance = editorRef.current || editor
-      if (!instance) return
-
-      clearHighlights('ai-pending')
-      clearHighlights('ai-applied')
-      clearHighlightTimeout()
-
-      const content = String(payload.content || '').trim()
-      if (!content) return
-
-      // 等待编辑器渲染完成再找 DOM
-      window.setTimeout(() => {
-        const ctx = getEditorDomContext(instance)
-        if (!ctx) return
-        const needle = content.length > 1200 ? content.slice(0, 1200) : content
-        aiAppliedNeedleRef.current = needle
-        const r = findTextRangeInElement(ctx.pre, needle)
-        if (!r) return
-        const rects = computeContentRects(r, ctx.wrapper, ctx.pre)
-        setHighlightRects({ id: 'ai-applied', color: 'rgba(120, 255, 120, 0.20)', rects })
-
-        highlightTimeoutRef.current = window.setTimeout(() => {
-          aiAppliedNeedleRef.current = null
-          clearHighlights('ai-applied')
-        }, 8000)
-      }, 80)
-    }
-
-    emitter.on('editor-ai-applied', handler)
-    return () => {
-      emitter.off('editor-ai-applied', handler)
-    }
-  }, [editor])
-
-  // 切换文件时清掉所有高亮
-  useEffect(() => {
-    clearHighlights()
-  }, [activeFilePath])
 
   useEffect(() => {
     emitter.on('toolbar-reset-selected-text', resetSelectedText)
     return () => {
       emitter.off('toolbar-reset-selected-text')
+    }
+  }, [editor])
+
+  useEffect(() => {
+    const instance = editorRef.current || editor
+    if (!instance) return
+    const el = instance.vditor?.element as HTMLElement | undefined
+    if (!el) return
+
+    const updateFromDomSelection = () => {
+      const sel = window.getSelection()
+      const text = String(sel?.toString() || '')
+      if (!text.trim()) {
+        resetSelectedText()
+        return
+      }
+      setSelectedText(text)
+      setFloatBarPosition(getSelectionFloatBarPosition() || instance.getCursorPosition())
+    }
+
+    el.addEventListener('mouseup', updateFromDomSelection)
+    el.addEventListener('keyup', updateFromDomSelection)
+    return () => {
+      el.removeEventListener('mouseup', updateFromDomSelection)
+      el.removeEventListener('keyup', updateFromDomSelection)
     }
   }, [editor])
 
@@ -797,10 +500,7 @@ export function MdEditor() {
     isReinitializingRef.current = true
     const instance = editorRef.current || editor
     if (instance) {
-      try {
-        highlightUiRef.current.cleanup?.()
-        highlightUiRef.current = { pre: null, wrapper: null, layer: null, inner: null, cleanup: null }
-        instance.destroy()
+      try {        instance.destroy()
       } catch {}
       editorRef.current = null
       setEditor(undefined)
@@ -861,9 +561,6 @@ export function MdEditor() {
       const instance = editorRef.current || editor
       if (!instance) return
       setEditorPadding(instance)
-      try {
-        refreshHighlights(instance)
-      } catch {}
     }
     window.addEventListener('resize', handler)
     return () => {
@@ -921,10 +618,7 @@ export function MdEditor() {
                 const currentMode = editor.vditor.currentMode
 
                 isReinitializingRef.current = true
-                try {
-                  highlightUiRef.current.cleanup?.()
-                  highlightUiRef.current = { pre: null, wrapper: null, layer: null, inner: null, cleanup: null }
-                } catch {}
+                try {                } catch {}
                 editor.destroy()
                 editorRef.current = null
                 setEditor(undefined)
@@ -1112,3 +806,11 @@ export function MdEditor() {
     <FloatBar left={floatBarPosition?.left} top={floatBarPosition?.top} value={selectedText} editor={editor} />
   </div>
 }
+
+
+
+
+
+
+
+

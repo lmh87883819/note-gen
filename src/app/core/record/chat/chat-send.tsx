@@ -15,7 +15,7 @@ import { readTextFile } from "@tauri-apps/plugin-fs"
 import { getFilePathOptions, getWorkspacePath } from "@/lib/workspace"
 import { useMcpStore } from "@/stores/mcp"
 import { getOpenAIFunctions } from "@/lib/mcp/tools"
-import { AgentHandler } from "@/lib/agent/agent-handler"
+import { BackendAgentHandler } from "@/lib/agent/backend-agent-handler"
 
 interface ChatSendProps {
   inputValue: string;
@@ -32,7 +32,7 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
   const { isRagEnabled } = useVectorStore()
   const { selectedServerIds } = useMcpStore()
   const abortControllerRef = useRef<AbortController | null>(null)
-  const agentHandlerRef = useRef<AgentHandler | null>(null)
+  const agentHandlerRef = useRef<BackendAgentHandler | null>(null)
   const t = useTranslations()
 
   useImperativeHandle(ref, () => ({
@@ -64,9 +64,8 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
       chats,
     })
 
-    // 每次都创建新的 AgentHandler，使用当前的 placeholderMessage
-    const agentHandler = new AgentHandler({
-      requestConfirmation: requestAgentConfirmation,
+    // B2: 使用后端 Planner+Executor（SSE 事件）执行编辑器 Agent
+    const agentHandler = new BackendAgentHandler({
       onComplete: async (result) => {
         // 获取 Agent 执行历史
         const { agentState } = useChatStore.getState()
@@ -124,7 +123,7 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
     agentHandlerRef.current = agentHandler
 
     try {
-      await agentHandler.execute(userInput, agentContext || undefined, { imageUrls })
+      await agentHandler.execute(userInput)
     } catch (error) {
       console.error('Agent execution error:', error)
     } finally {

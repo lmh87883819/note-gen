@@ -26,6 +26,8 @@ export interface Article {
   path: string
 }
 
+type ArticleUpdateSource = 'open' | 'agent' | 'unknown'
+
 interface NoteState {
   loading: boolean
   setLoading: (loading: boolean) => void
@@ -69,6 +71,8 @@ interface NoteState {
 
   currentArticle: string
   readArticle: (path: string) => Promise<void>
+  readArticleFromAgent: (path: string) => Promise<void>
+  lastArticleUpdate: { path: string; source: ArticleUpdateSource; at: number } | null
   setCurrentArticle: (content: string) => void
   saveCurrentArticle: (content: string) => Promise<void>
 
@@ -707,6 +711,7 @@ const useArticleStore = create<NoteState>((set, get) => ({
   },
 
   currentArticle: '',
+  lastArticleUpdate: null,
   readArticle: async (path: string) => {
     get().setLoading(true)
     try {
@@ -715,9 +720,23 @@ const useArticleStore = create<NoteState>((set, get) => ({
       const content = workspace.isCustom
         ? await readTextFile(pathOptions.path)
         : await readTextFile(pathOptions.path, { baseDir: pathOptions.baseDir })
-      set({ currentArticle: content })
+      set({ currentArticle: content, lastArticleUpdate: { path, source: 'open', at: Date.now() } })
     } catch {
-      set({ currentArticle: '' })
+      set({ currentArticle: '', lastArticleUpdate: { path, source: 'open', at: Date.now() } })
+    }
+    get().setLoading(false)
+  },
+  readArticleFromAgent: async (path: string) => {
+    get().setLoading(true)
+    try {
+      const workspace = await getWorkspacePath()
+      const pathOptions = await getFilePathOptions(path)
+      const content = workspace.isCustom
+        ? await readTextFile(pathOptions.path)
+        : await readTextFile(pathOptions.path, { baseDir: pathOptions.baseDir })
+      set({ currentArticle: content, lastArticleUpdate: { path, source: 'agent', at: Date.now() } })
+    } catch {
+      set({ currentArticle: '', lastArticleUpdate: { path, source: 'agent', at: Date.now() } })
     }
     get().setLoading(false)
   },

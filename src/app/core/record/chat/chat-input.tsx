@@ -122,9 +122,62 @@ export function ChatInput() {
       if (!payload?.filePath || !payload?.snippet?.trim()) return
       addSnippetAndInsert({ filePath: payload.filePath, snippet: payload.snippet })
     })
+    emitter.on('chat-prefill-draft', (event: unknown) => {
+      const payload = event as {
+        mode?: 'replace' | 'append'
+        text?: string
+        focus?: boolean
+        snippet?: { filePath: string; snippet: string }
+      }
+
+      const mode = payload?.mode || 'replace'
+      const nextText = String(payload?.text || '')
+
+      if (mode === 'replace') {
+        setText('')
+        setHistoryIndex(-1)
+        setLinkedFiles([])
+        setLinkedSnippets([])
+        setInlineImages([])
+        if (editorRef.current) {
+          editorRef.current.innerHTML = ''
+        }
+        selectionRangeRef.current = null
+      }
+
+      if (payload?.snippet?.filePath && payload?.snippet?.snippet?.trim()) {
+        addSnippetAndInsert({ filePath: payload.snippet.filePath, snippet: payload.snippet.snippet })
+      }
+
+      if (nextText.trim()) {
+        const el = editorRef.current
+        if (el) {
+          el.focus()
+          const range = getSafeInsertRange(el)
+          range.collapse(false)
+          const textNode = document.createTextNode((payload?.snippet ? '\n' : '') + nextText)
+          range.insertNode(textNode)
+          range.collapse(false)
+          const selection = window.getSelection()
+          if (selection) {
+            selection.removeAllRanges()
+            selection.addRange(range)
+          }
+          selectionRangeRef.current = range.cloneRange()
+          updateTextFromDom()
+        } else {
+          setText(nextText)
+        }
+      }
+
+      if (payload?.focus !== false) {
+        editorRef.current?.focus()
+      }
+    })
     return () => {
       emitter.off('revertChat')
       emitter.off('chat-add-snippet')
+      emitter.off('chat-prefill-draft')
     }
   }, [])
 

@@ -39,28 +39,6 @@ async function resolveActiveFileAbsolute(activeFilePath: string): Promise<string
   return await join(await appDataDir(), 'article', activeFilePath)
 }
 
-function buildRunSummaryFromResult(result: any): string {
-  const steps = Array.isArray(result?.steps) ? result.steps : []
-  const lines: string[] = []
-  lines.push('结论')
-  const failed = steps.find((s: any) => s?.status === 'failed')
-  if (failed) {
-    lines.push(`任务失败：${failed?.error || 'unknown error'}`)
-  } else {
-    lines.push('任务完成。')
-  }
-  lines.push('')
-  lines.push('执行概览')
-  for (const s of steps) {
-    const tool = String(s?.task || '')
-    const status = String(s?.status || '')
-    const out = s?.output?.data?.tool_result
-    const filePath = out?.meta?.file_path || out?.meta?.filePath || s?.output?.asset_uri || ''
-    lines.push(`- ${tool}: ${status}${filePath ? ` (${filePath})` : ''}`)
-  }
-  return lines.join('\n')
-}
-
 function buildRunSummaryFromResultZh(result: any): string {
   const steps = Array.isArray(result?.steps) ? result.steps : []
   const planSteps = Array.isArray(result?.plan?.root) ? result.plan.root : Array.isArray(result?.plan) ? result.plan : []
@@ -354,14 +332,29 @@ export class BackendAgentHandler {
           const toolName = String((ev as any).task || '')
           const args = ((ev as any).args || {}) as Record<string, any>
           const runId = backendRunId || String((ev as any).run_id || '')
+
+          // Auto-approve confirmation (undo is available in editor).
+          try {
+            void fetch(`${baseUrl.replace(/\/$/, '')}/api/editor/confirm`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                session_id: sessionId,
+                run_id: runId,
+                task_id: taskId,
+                confirmed: true,
+              }),
+            })
+          } catch {}
+
+          const latest = useChatStore.getState().agentState
           chatStore.setAgentState({
-            phase: 'awaiting_confirmation',
-            pendingConfirmation: {
-              id: `${sessionId}:${runId}:${taskId}`,
-              toolName,
-              params: args,
-              backend: { baseUrl, sessionId, runId, taskId },
-            },
+            phase: 'executing',
+            pendingConfirmation: undefined,
+            confirmationHistory: [
+              ...(latest?.confirmationHistory || []),
+              { toolName, params: args, status: 'confirmed', timestamp: Date.now() } as any,
+            ],
           })
           return
         }
@@ -410,7 +403,7 @@ export class BackendAgentHandler {
             const mutating = task === 'write_file' || task === 'replace_snippet' || task === 'replace_lines' || task === 'apply_patch'
             if (mutating && matchesActive(outPath) && activeFilePath) {
               needsRefreshAfterWrite = true
-              void useArticleStore.getState().readArticle(activeFilePath)
+              void useArticleStore.getState().readArticleFromAgent(activeFilePath)
             }
 
             // Optional follow-up read_file step: clear the flag when we see it (but we already refreshed from disk).

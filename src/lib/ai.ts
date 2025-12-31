@@ -379,7 +379,7 @@ async function prepareMessages(
   geminiText?: string
 }> {
   // 获取prompt内容
-  let promptContent = await getPromptContent()
+  const promptContent = await getPromptContent()
   
   void includeLanguage
   

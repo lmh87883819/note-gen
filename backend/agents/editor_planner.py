@@ -56,6 +56,7 @@ Rules:
   - Never reference a step that is not in dep.
 - If context.selected_snippets is provided and the user asks to rewrite/polish/translate "this paragraph/snippet", you MUST only modify that snippet:
   - Use generate_text to produce the rewritten snippet ONLY (not the whole file).
+  - If the selected snippet is a Markdown heading line (starts with '#'), generate_text MUST return exactly ONE Markdown heading line (same heading level, no extra options).
   - Then use replace_snippet to replace old_text with new_text in the target file.
   - Do NOT rewrite/clear the entire file unless the user explicitly requests a full rewrite.
 - Prefer this robust pattern for edits:

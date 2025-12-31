@@ -28,7 +28,7 @@ import { createToolbarConfig } from './toolbar.config'
 export function MdEditor() {
   const [editor, setEditor] = useState<Vditor>();
   const editorRef = useRef<Vditor | null>(null)
-  const { currentArticle, saveCurrentArticle, loading, activeFilePath, matchPosition, setMatchPosition, setActiveFilePath, loadFileTree, setCurrentArticle } = useArticleStore()
+  const { currentArticle, saveCurrentArticle, loading, activeFilePath, matchPosition, setMatchPosition, setActiveFilePath, loadFileTree, setCurrentArticle, lastArticleUpdate } = useArticleStore()
   const { assetsPath, contentTextScale } = useSettingStore()
   const [floatBarPosition, setFloatBarPosition] = useState<{left: number, top: number} | null>(null)
   const [selectedText, setSelectedText] = useState<string>('')
@@ -448,6 +448,10 @@ export function MdEditor() {
 
 
   useEffect(() => {
+    activeFilePathRef.current = activeFilePath
+  }, [activeFilePath])
+
+  useEffect(() => {
     emitter.on('toolbar-reset-selected-text', resetSelectedText)
     return () => {
       emitter.off('toolbar-reset-selected-text')
@@ -550,11 +554,16 @@ export function MdEditor() {
     if (activeFilePath) {
       setContent(currentArticle)
       const instance = editorRef.current || editor
-      instance?.clearStack()
       if (!instance) return
+      const shouldClearStack =
+        lastArticleUpdate?.path === activeFilePath &&
+        lastArticleUpdate?.source !== 'agent'
+      if (shouldClearStack) {
+        instance.clearStack()
+      }
       handleLocalImage(instance)
     }
-  }, [currentArticle, editor, activeFilePath])
+  }, [currentArticle, editor, activeFilePath, lastArticleUpdate])
 
   useEffect(() => {
     const handler = () => {

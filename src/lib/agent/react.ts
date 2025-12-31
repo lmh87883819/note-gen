@@ -121,7 +121,7 @@ export class ReActAgent {
         ])
       : userInput
 
-    let messages: any[] = [
+    const messages: any[] = [
       { role: 'system', content: systemPrompt },
       ...(plan.length ? [{ role: 'system', content: `执行计划：\n${plan.map((p, i) => `${i + 1}. ${p}`).join('\n')}` }] : []),
       ...(context ? [{ role: 'system', content: `上下文信息：\n${context}` }] : []),

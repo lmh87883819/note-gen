@@ -5,7 +5,6 @@ import { RagSwitch } from "./rag-switch"
 import { ClearContext } from "./clear-context"
 import { ClearChat } from "./clear-chat"
 import useSettingStore from "@/stores/setting"
-import useChatStore from "@/stores/chat"
 
 // 工具栏分组定义
 const TOOLBAR_GROUPS = {
@@ -14,8 +13,7 @@ const TOOLBAR_GROUPS = {
 }
 
 export function ChatHeader() {
-  const { primaryModel, chatToolbarConfigPc } = useSettingStore()
-  const { loading } = useChatStore()
+  const { chatToolbarConfigPc } = useSettingStore()
 
   // 渲染工具栏项
   const renderToolbarItem = (id: string) => {

@@ -38,6 +38,37 @@ def _to_original_newlines(s: str, *, original_had_crlf: bool) -> str:
     return s.replace("\n", "\r\n")
 
 
+def _looks_like_heading_line(s: str) -> bool:
+    s = (s or "").strip()
+    if "\n" in s:
+        return False
+    return bool(re.match(r"^#{1,6}\\s+\\S", s))
+
+
+_CHAT_PREFIX_RE = re.compile(r"^(你好|您好|嗨|哈喽|我是|作为)")
+
+
+def _validate_new_text(old_text: str, new_text: str) -> None:
+    old_s = _normalize_newlines(old_text or "").strip()
+    new_s = _normalize_newlines(new_text or "").strip()
+
+    # Common failure mode: LLM returns chatty preface/explanations instead of the edited snippet.
+    if _CHAT_PREFIX_RE.match(new_s) and not _CHAT_PREFIX_RE.match(old_s):
+        raise ValueError("Refusing to apply chatty preface. Please return ONLY the rewritten snippet.")
+
+    # If the old snippet is a Markdown heading line, the replacement must also be a single heading line.
+    if _looks_like_heading_line(old_s):
+        if "\n" in new_s:
+            raise ValueError("Refusing to replace a single heading line with multi-line content. Return ONE final title line only.")
+        if not _looks_like_heading_line(new_s):
+            raise ValueError("Replacement for a Markdown heading must be a Markdown heading line (e.g. '# Title').")
+
+        old_hashes = re.match(r"^(#{1,6})\\s+", old_s)
+        new_hashes = re.match(r"^(#{1,6})\\s+", new_s)
+        if old_hashes and new_hashes and old_hashes.group(1) != new_hashes.group(1):
+            raise ValueError("Refusing to change heading level while editing a title snippet. Keep the same number of '#' characters.")
+
+
 def _find_nth(haystack: str, needle: str, n: int) -> int:
     if n <= 0:
         raise ValueError("occurrence must be >= 1")
@@ -184,6 +215,8 @@ async def replace_snippet(
     new_text = "" if new_text is None else str(new_text)
     if old_text.strip() == "":
         raise ValueError("old_text is required and cannot be empty")
+
+    _validate_new_text(old_text, new_text)
 
     original = _read_text(file_path)
     original_had_crlf = "\r\n" in original

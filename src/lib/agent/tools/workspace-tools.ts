@@ -2,7 +2,6 @@ import { Tool, ToolResult } from '../types'
 import useArticleStore from '@/stores/article'
 import { getAllWorkspaceFiles } from '@/lib/files'
 import { getFilePathOptions, getWorkspacePath } from '@/lib/workspace'
-import emitter from '@/lib/emitter'
 import { readTextFile, writeTextFile, readFile } from '@tauri-apps/plugin-fs'
 
 export const getCurrentArticleTool: Tool = {

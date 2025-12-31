@@ -27,7 +27,7 @@ interface ChatSendProps {
 
 export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ inputValue, onSent, linkedFiles, linkedSnippets, inlineImages }, ref) => {
   const { primaryModel } = useSettingStore()
-  const { insert, loading, setLoading, saveChat, chats, chatMode, requestAgentConfirmation, agentMemorySummary, setAgentMemorySummary } = useChatStore()
+  const { insert, loading, setLoading, saveChat, chats, chatMode, agentMemorySummary, setAgentMemorySummary } = useChatStore()
   const { activeFilePath, currentArticle } = useArticleStore()
   const { isRagEnabled } = useVectorStore()
   const { selectedServerIds } = useMcpStore()
@@ -56,8 +56,7 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
 
     // Agent 上下文：把 @ 引用的文件内容作为 context 传入（避免污染用户输入本身）
     const attachments = await buildLinkedFileAttachments(opts.linkedFiles)
-    const inlineImageUrls = (inlineImages || []).map(i => i.dataUrl).filter(Boolean)
-    const imageUrls = [...attachments.imageUrls, ...inlineImageUrls]
+    void inlineImages
     const agentContext = buildAgentContext({
       activeFilePath,
       currentArticle,

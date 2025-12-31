@@ -17,6 +17,17 @@ function extractToolMeta(call: any): any {
   return data?.data?.tool_result?.results?.[0]?.meta ?? {}
 }
 
+function isDiffLike(call: any): boolean {
+  if (!call?.result?.success) return false
+  if (call.toolName === 'diff_preview') return true
+  const tr = call?.result?.data?.data?.tool_result
+  const first = Array.isArray(tr?.results) ? tr.results[0] : undefined
+  const mime = String(first?.mime || '')
+  if (mime.includes('diff')) return true
+  const text = extractToolContent(call)
+  return typeof text === 'string' && (text.includes('\n@@') || text.startsWith('--- ') || text.startsWith('diff '))
+}
+
 function getDiffLineClass(line: string): string {
   const first = line.slice(0, 1)
   if (first === '+') return 'agent-diff-line agent-diff-plus'
@@ -199,7 +210,7 @@ export function AgentExecutionStatus() {
                 </div>
                 {expanded && (
                   <div className="pl-6 pr-3 pb-2 text-xs text-muted-foreground">
-                    {call?.result?.success && call.toolName === 'diff_preview' && (
+                    {isDiffLike(call) && (
                       <div className="mt-2">
                         <div className="font-medium text-xs mb-1 text-foreground/80">Diff</div>
                         <div className="agent-diff-box">

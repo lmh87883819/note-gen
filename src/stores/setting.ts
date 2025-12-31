@@ -11,6 +11,41 @@ export interface ChatToolbarItem {
   order: number
 }
 
+const CHAT_TOOLBAR_ALLOWED_IDS = new Set([
+  'modelSelect',
+  'mcpButton',
+  'ragSwitch',
+  'clearContext',
+  'clearChat',
+])
+
+function normalizeChatToolbarConfig(config: unknown): ChatToolbarItem[] {
+  const items = Array.isArray(config) ? (config as ChatToolbarItem[]) : []
+  const next: ChatToolbarItem[] = []
+  const seen = new Set<string>()
+
+  for (const item of items) {
+    const id = String((item as any)?.id || '')
+    if (!CHAT_TOOLBAR_ALLOWED_IDS.has(id)) continue
+    if (seen.has(id)) continue
+    seen.add(id)
+    next.push({
+      id,
+      enabled: Boolean((item as any)?.enabled),
+      order: Number.isFinite((item as any)?.order) ? Number((item as any)?.order) : 0,
+    })
+  }
+
+  // Ensure required items exist (default enabled)
+  for (const id of CHAT_TOOLBAR_ALLOWED_IDS) {
+    if (seen.has(id)) continue
+    next.push({ id, enabled: true, order: next.length })
+  }
+
+  next.sort((a, b) => a.order - b.order)
+  return next.map((item, index) => ({ ...item, order: index }))
+}
+
 const createSettingStore = (set: any, get: any) => ({
   initSettingData: async () => {
     const store = await Store.load('store.json');
@@ -167,6 +202,11 @@ const createSettingStore = (set: any, get: any) => ({
         if (key === 'aiModelList' && hasNoteGenModels) {
           // 如果已经有NoteGen模型，使用存储的配置
           set({ [key]: res as AiConfig[] })
+        } else if (key === 'chatToolbarConfigPc' || key === 'chatToolbarConfigMobile') {
+          const normalized = normalizeChatToolbarConfig(res)
+          set({ [key]: normalized })
+          await store.set(key, normalized)
+          await store.save()
         } else if (key !== 'aiModelList') {
           set({ [key]: res })
         }
@@ -365,40 +405,34 @@ const createSettingStore = (set: any, get: any) => ({
   chatToolbarConfigPc: [
     // 底部工具栏
     { id: 'modelSelect', enabled: true, order: 0 },
-    { id: 'promptSelect', enabled: true, order: 1 },
-    { id: 'chatLanguage', enabled: true, order: 2 },
     // 顶部工具栏 - 左侧
-    { id: 'fileLink', enabled: true, order: 4 },
     { id: 'mcpButton', enabled: true, order: 5 },
     { id: 'ragSwitch', enabled: true, order: 6 },
-    { id: 'chatPlaceholder', enabled: true, order: 7 },
     // 顶部工具栏 - 右侧
     { id: 'clearContext', enabled: true, order: 8 },
     { id: 'clearChat', enabled: true, order: 9 },
   ],
   setChatToolbarConfigPc: async (config: ChatToolbarItem[]) => {
-    set({ chatToolbarConfigPc: config })
+    const normalized = normalizeChatToolbarConfig(config)
+    set({ chatToolbarConfigPc: normalized })
     const store = await Store.load('store.json');
-    await store.set('chatToolbarConfigPc', config)
+    await store.set('chatToolbarConfigPc', normalized)
     await store.save()
   },
 
   // 聊天工具栏配置 - 移动端
   chatToolbarConfigMobile: [
     { id: 'modelSelect', enabled: true, order: 0 },
-    { id: 'promptSelect', enabled: true, order: 1 },
-    { id: 'chatLanguage', enabled: true, order: 2 },
-    { id: 'fileLink', enabled: true, order: 4 },
     { id: 'mcpButton', enabled: true, order: 5 },
     { id: 'ragSwitch', enabled: true, order: 6 },
-    { id: 'chatPlaceholder', enabled: true, order: 7 },
     { id: 'clearContext', enabled: true, order: 8 },
     { id: 'clearChat', enabled: true, order: 9 },
   ],
   setChatToolbarConfigMobile: async (config: ChatToolbarItem[]) => {
-    set({ chatToolbarConfigMobile: config })
+    const normalized = normalizeChatToolbarConfig(config)
+    set({ chatToolbarConfigMobile: normalized })
     const store = await Store.load('store.json');
-    await store.set('chatToolbarConfigMobile', config)
+    await store.set('chatToolbarConfigMobile', normalized)
     await store.save()
   },
 

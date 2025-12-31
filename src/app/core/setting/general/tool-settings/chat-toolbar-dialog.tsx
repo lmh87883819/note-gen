@@ -8,12 +8,8 @@ import { useEffect, useState } from 'react'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { 
   BotMessageSquare, 
-  Drama, 
-  Languages, 
-  FileText, 
   ServerCrash, 
   BookOpen, 
-  Lightbulb, 
   Eraser, 
   Trash2,
   GripVertical
@@ -44,20 +40,16 @@ interface ChatToolbarDialogProps {
 // 工具配置映射
 const TOOL_CONFIG_MAP: Record<string, { icon: React.ReactNode; labelKey: string }> = {
   modelSelect: { icon: <BotMessageSquare className="size-4" />, labelKey: 'modelSelect.tooltip' },
-  promptSelect: { icon: <Drama className="size-4" />, labelKey: 'promptSelect.tooltip' },
-  chatLanguage: { icon: <Languages className="size-4" />, labelKey: 'chatLanguage.tooltip' },
-  fileLink: { icon: <FileText className="size-4" />, labelKey: 'fileLink.tooltip' },
   mcpButton: { icon: <ServerCrash className="size-4" />, labelKey: 'mcp.tooltip' },
   ragSwitch: { icon: <BookOpen className="size-4" />, labelKey: 'rag.enabled' },
-  chatPlaceholder: { icon: <Lightbulb className="size-4" />, labelKey: 'placeholder.on' },
   clearContext: { icon: <Eraser className="size-4" />, labelKey: 'clearContext.tooltip' },
   clearChat: { icon: <Trash2 className="size-4" />, labelKey: 'clearChat' },
 }
 
 // 工具栏分组定义
 const TOOLBAR_GROUPS = {
-  bottom: ['modelSelect', 'promptSelect', 'chatLanguage'],
-  topLeft: ['fileLink', 'mcpButton', 'ragSwitch', 'chatPlaceholder'],
+  bottom: ['modelSelect'],
+  topLeft: ['mcpButton', 'ragSwitch'],
   topRight: ['clearContext', 'clearChat'],
 }
 
@@ -267,11 +259,11 @@ export function ChatToolbarDialog({ open, onOpenChange }: ChatToolbarDialogProps
                 onDragEnd={handleDragEndMobile}
               >
                 <SortableContext
-                  items={localConfigMobile.filter(item => !['modelSelect', 'promptSelect'].includes(item.id)).map(item => item.id)}
+                  items={localConfigMobile.filter(item => item.id !== 'modelSelect').map(item => item.id)}
                   strategy={verticalListSortingStrategy}
                 >
                   {localConfigMobile
-                    .filter(item => !['modelSelect', 'promptSelect'].includes(item.id))
+                    .filter(item => item.id !== 'modelSelect')
                     .map((item) => (
                     <SortableToolItem
                       key={item.id}

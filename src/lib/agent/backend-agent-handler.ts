@@ -125,7 +125,17 @@ function buildRunSummaryFromResultZh(result: any): string {
     }
   }
 
-  const diffStep = steps.find((s: any) => String(s?.task || '') === 'diff_preview' && s?.status === 'completed')
+  const isDiffArtifact = (s: any) => {
+    const tr = s?.output?.data?.tool_result
+    const first = Array.isArray(tr?.results) ? tr.results[0] : undefined
+    const mime = String(first?.mime || '')
+    return mime.includes('diff')
+  }
+
+  const diffStep =
+    steps.find((s: any) => String(s?.task || '') === 'diff_preview' && s?.status === 'completed') ??
+    [...steps].reverse().find((s: any) => s?.status === 'completed' && isDiffArtifact(s))
+
   const diff =
     diffStep?.output?.data?.content ??
     diffStep?.output?.data?.tool_result?.results?.[0]?.content ??

@@ -8,21 +8,7 @@ import { fetch } from "@tauri-apps/plugin-http";
  * 获取当前的 prompt 内容
  */
 async function getPromptContent(): Promise<string> {
-  const store = await Store.load('store.json')
-  const currentPromptId = await store.get<string>('currentPromptId')
-  let promptContent = ''
-  
-  if (currentPromptId) {
-    const promptList = await store.get<Array<{id: string, content: string}>>('promptList')
-    if (promptList) {
-      const currentPrompt = promptList.find(prompt => prompt.id === currentPromptId)
-      if (currentPrompt && currentPrompt.content) {
-        promptContent = currentPrompt.content
-      }
-    }
-  }
-  
-  return promptContent
+  return ''
 }
 
 /**
@@ -395,11 +381,7 @@ async function prepareMessages(
   // 获取prompt内容
   let promptContent = await getPromptContent()
   
-  if (includeLanguage) {
-    const store = await Store.load('store.json')
-    const chatLanguage = await store.get<string>('chatLanguage') || 'English'
-    promptContent += '\n\n' + `IMPORTANT: You MUST respond in ${chatLanguage} language. Do NOT use any other language under any circumstances.`
-  }
+  void includeLanguage
   
   // 定义消息数组
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = []
@@ -687,54 +669,10 @@ export async function fetchAiDesc(text: string) {
       top_p: aiConfig?.topP || 1,
     })
     
-    return completion.choices[0].message.content || ''
+  return completion.choices[0].message.content || ''
   } catch (error) {
     handleAIError(error, false)
     return null
-  }
-}
-
-// placeholder
-export async function fetchAiPlaceholder(text: string): Promise<string | false> {
-  try {
-    // 获取AI设置
-    const aiConfig = await getAISettings('placeholderModel')
-    
-    // 检查配置是否存在
-    if (!aiConfig) {
-      console.error('Placeholder model not configured')
-      return false
-    }
-
-    // 构建 placeholder 提示词
-    const placeholderPrompt = `
-      You are a note-taking software with an intelligent assistant. You can refer to the recorded content to take notes.
-      Do not exceed 20 characters.
-      There is only one line left. Line breaks are prohibited.
-      Do not generate any special characters.
-      Leave it as plain text and no format is required.
-      Generate a question based on the following content:
-      ${text}`
-
-    // 准备消息
-    const { messages } = await prepareMessages(placeholderPrompt, true)
-    
-    const openai = await createOpenAIClient(aiConfig)
-      
-    const completion = await openai.chat.completions.create({
-      model: aiConfig.model || '',
-      messages: messages,
-      temperature: aiConfig.temperature || 1,
-      top_p: aiConfig.topP || 1,
-    })
-
-    const result = completion.choices[0]?.message?.content || ''
-
-    // 去掉所有换行符和各种特殊符号，不包括空格
-    return result.trim()
-  } catch (error) {
-    console.error('Error in fetchAiPlaceholder:', error)
-    return false
   }
 }
 

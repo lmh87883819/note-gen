@@ -23,9 +23,6 @@ interface ChatState {
   loading: boolean
   setLoading: (loading: boolean) => void
 
-  isPlaceholderEnabled: boolean // 是否启用AI提示占位符
-  setPlaceholderEnabled: (isEnabled: boolean) => void
-
   chats: Chat[]
   init: () => Promise<void> // 初始化 chats
   insert: (chat: Omit<Chat, 'id' | 'createdAt' | 'tagId'> & { tagId?: number }) => Promise<Chat | null> // 插入一条 chat
@@ -67,11 +64,6 @@ const useChatStore = create<ChatState>((set, get) => ({
 
   setLoading: (loading: boolean) => {
     set({ loading })
-  },
-
-  isPlaceholderEnabled: true,
-  setPlaceholderEnabled: (isEnabled: boolean) => {
-    set({ isPlaceholderEnabled: isEnabled })
   },
 
   chatMode: (typeof window !== 'undefined' ? localStorage.getItem('chatMode') as ChatMode : null) || 'chat',

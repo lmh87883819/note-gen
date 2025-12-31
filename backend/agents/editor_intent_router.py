@@ -43,12 +43,22 @@ Input is a JSON object string with fields:
 }
 
 Guidelines:
+- Decide based PRIMARILY on the latest user message. Do not let an open article bias you into review/edit
+  when the user is clearly asking for general chat (e.g. a joke).
 - intent=edit_article when the user clearly wants to modify the current article/file (rewrite, polish, expand, delete, format, fix headings, etc),
   or when selected_snippets are provided for rewrite/polish/translate.
 - intent=review_article when the user asks for feedback/evaluation/summary of how the current article is written,
   WITHOUT asking to modify the file.
 - intent=chat when it's clearly general conversation (jokes, explanations, brainstorming) and does NOT ask to modify files.
 - intent=clarify when it's ambiguous, especially short follow-ups like "长一点/再来一个/换个风格" while an article is open.
+
+Overrides (high priority):
+- If the latest message explicitly asks for a joke/story/poem/explanation/advice (e.g. "给我讲个笑话"),
+  intent MUST be "chat", even if active_file_path exists and recent chat mentions the article.
+- If selected_snippets is provided and the user asks to rewrite/polish/translate "this paragraph/snippet",
+  intent MUST be "edit_article".
+- If the latest message explicitly asks to evaluate/summarize/comment on "this article",
+  intent MUST be "review_article".
 
 When intent=clarify:
 - Provide clarify_prompt in Chinese.
@@ -87,4 +97,3 @@ def build_editor_intent_input(
         },
     }
     return json.dumps(payload, ensure_ascii=False)
-

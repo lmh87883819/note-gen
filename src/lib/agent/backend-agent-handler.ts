@@ -155,6 +155,26 @@ function buildRunSummaryFromResultZh(result: any): string {
   return lines.join('\n')
 }
 
+function buildFinalAssistantTextFromResult(result: any): string {
+  const steps = Array.isArray(result?.steps) ? result.steps : []
+  const mutatingTasks = new Set(['write_file', 'replace_snippet', 'replace_lines', 'apply_patch'])
+  const hasMutations = steps.some((s: any) => mutatingTasks.has(String(s?.task || '')))
+
+  // If there are no filesystem mutations, prefer showing the generated text output directly
+  // (e.g. "讲个笑话", "总结文章写得怎么样") instead of a workflow report.
+  if (!hasMutations) {
+    const lastGenerated = [...steps]
+      .reverse()
+      .find((s: any) => String(s?.task || '') === 'generate_text' && String(s?.status || '') === 'completed')
+    const generatedContent = lastGenerated?.output?.data?.content
+    if (typeof generatedContent === 'string' && generatedContent.trim()) {
+      return generatedContent.trim()
+    }
+  }
+
+  return buildRunSummaryFromResultZh(result)
+}
+
 async function parseSseStream(
   response: Response,
   onEvent: (event: EditorRunEvent) => void,
@@ -417,7 +437,7 @@ export class BackendAgentHandler {
 
       if (type === 'run_completed') {
         const result = (ev as any).result
-        const summary = buildRunSummaryFromResultZh(result)
+        const summary = buildFinalAssistantTextFromResult(result)
         chatStore.setAgentState({ phase: 'completed', isRunning: false, pendingConfirmation: undefined })
         void this.config.onComplete(summary)
         return

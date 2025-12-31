@@ -50,9 +50,11 @@ if __package__ in (None, ""):
 
 from backend.agents import build_domain_agents, get_router_agent
 from backend.agents import get_guard_agent
+from backend.agents.editor_intent_router import build_editor_intent_input, get_editor_intent_router_agent
 from backend.agents.editor_planner import build_editor_planner_input, get_editor_planner_agent
 from backend.agents.editor_tool_router import build_editor_router_input, get_editor_tool_router_agent
 from backend.data_types import RunResult, SessionMemory, TaskPlan
+from backend.data_types import PlannedTask, ToolName
 from backend.executor import ToolPlanExecutor
 from backend.memory import MemoryStore
 from backend.orchestrator import Orchestrator
@@ -118,6 +120,7 @@ memory_store = MemoryStore()
 orchestrator = None
 editor_planner = None
 editor_tool_router = None
+editor_intent_router = None
 pending_confirms: dict[tuple[str, str, int], asyncio.Future[bool]] = {}
 
 _GEN_TOKEN_RE = re.compile(r"<GENERATED>-(\d+)(?:-([a-zA-Z0-9_]+))?")
@@ -185,6 +188,13 @@ def get_editor_tool_router():
     if editor_tool_router is None:
         editor_tool_router = get_editor_tool_router_agent()
     return editor_tool_router
+
+
+def get_editor_intent_router():
+    global editor_intent_router
+    if editor_intent_router is None:
+        editor_intent_router = get_editor_intent_router_agent()
+    return editor_intent_router
 
 def get_orchestrator() -> Orchestrator:
     global orchestrator
@@ -370,65 +380,149 @@ async def editor_run_stream(request: EditorRunRequest) -> StreamingResponse:
                         pass
                 logger.info("editor planner input: active_file_path=%s", active_file_path)
 
-                # Stage 1: tool routing (shrink tool set for stability when tools grow).
-                allowed_tool_names = None
+                # Stage 0: intent routing BEFORE planner/tool-router.
+                # Note: intent routing does NOT need active_content; only edit intent should use full article content.
+                intent = ""
+                clarify_prompt = ""
                 try:
-                    router_input = build_editor_router_input(
+                    intent_input = build_editor_intent_input(
+                        message=request.message,
+                        active_file_path=active_file_path,
+                        selected_snippets=request.selected_snippets,
+                        agent_context=request.agent_context,
+                    )
+                    intent_out = await asyncio.to_thread(get_editor_intent_router().run, intent_input)
+                    intent_content = getattr(intent_out, "content", None)
+                    if isinstance(intent_content, dict):
+                        intent = str(intent_content.get("intent") or "").strip()
+                        clarify_prompt = str(intent_content.get("clarify_prompt") or "").strip()
+                    else:
+                        intent = str(getattr(intent_content, "intent", "") or "").strip()
+                        clarify_prompt = str(getattr(intent_content, "clarify_prompt", "") or "").strip()
+                except Exception:
+                    intent = ""
+                    clarify_prompt = ""
+
+                if intent in {"chat", "clarify"}:
+                    prompt = clarify_prompt if (intent == "clarify" and clarify_prompt) else request.message
+                    plan = TaskPlan.model_validate(
+                        [
+                            PlannedTask(
+                                task=ToolName.GENERATE_TEXT,
+                                id=1,
+                                dep=[],
+                                args={"prompt": prompt},
+                                label="生成回复" if intent == "chat" else "引导澄清",
+                            ).model_dump(mode="json")
+                        ]
+                    )
+                elif intent == "review_article":
+                    if not active_file_path:
+                        plan = TaskPlan.model_validate(
+                            [
+                                PlannedTask(
+                                    task=ToolName.GENERATE_TEXT,
+                                    id=1,
+                                    dep=[],
+                                    args={"prompt": "请先打开要点评的文章（或粘贴全文/选中段落），我才能基于具体内容评价写作质量。"},
+                                    label="引导补充信息",
+                                ).model_dump(mode="json")
+                            ]
+                        )
+                    else:
+                        plan = TaskPlan.model_validate(
+                            [
+                                PlannedTask(
+                                    task=ToolName.READ_FILE,
+                                    id=1,
+                                    dep=[],
+                                    args={
+                                        "file_path": active_file_path,
+                                        "workspace_root": request.workspace_root,
+                                        "max_chars": 200000,
+                                    },
+                                    label="读取当前文章",
+                                ).model_dump(mode="json"),
+                                PlannedTask(
+                                    task=ToolName.GENERATE_TEXT,
+                                    id=2,
+                                    dep=[1],
+                                    args={
+                                        "prompt": (
+                                            "请评价这篇文章写得怎么样（中文回答），并给出可执行的改进建议。\n"
+                                            "要求：\n"
+                                            "1) 一句话总评（优点+问题）\n"
+                                            "2) 分项：结构逻辑、论证深度、语言风格、可读性/排版\n"
+                                            "3) 给 5 条具体修改建议（可直接照做）\n"
+                                            "4) 不要修改文件，只做点评\n\n"
+                                            "文章内容如下：\n"
+                                            "<GENERATED>-1-content"
+                                        )
+                                    },
+                                    label="生成点评",
+                                ).model_dump(mode="json"),
+                            ]
+                        )
+                else:
+                    # Stage 1: tool routing (shrink tool set for stability when tools grow).
+                    allowed_tool_names = None
+                    try:
+                        router_input = build_editor_router_input(
+                            message=request.message,
+                            workspace_root=request.workspace_root,
+                            active_file_path=active_file_path,
+                            active_content=request.active_content,
+                            selected_snippets=request.selected_snippets,
+                        )
+                        router_out = await asyncio.to_thread(get_editor_tool_router().run, router_input)
+                        route = getattr(router_out, "content", None)
+                        if hasattr(route, "tools"):
+                            allowed_tool_names = list(route.tools)  # ToolName values
+                    except Exception:
+                        allowed_tool_names = None
+
+                    if not allowed_tool_names:
+                        # Fallback: allow all registered tools.
+                        allowed_tool_names = list(build_tools().keys())
+
+                    planner_input = build_editor_planner_input(
+                        session_id=request.session_id,
                         message=request.message,
                         workspace_root=request.workspace_root,
                         active_file_path=active_file_path,
                         active_content=request.active_content,
+                        agent_context=request.agent_context,
                         selected_snippets=request.selected_snippets,
+                        allowed_tools=[t.value if hasattr(t, "value") else str(t) for t in allowed_tool_names],
+                        tool_docs=build_tool_docs(allowed_tool_names),
                     )
-                    router_out = await asyncio.to_thread(get_editor_tool_router().run, router_input)
-                    route = getattr(router_out, "content", None)
-                    if hasattr(route, "tools"):
-                        allowed_tool_names = list(route.tools)  # ToolName values
-                except Exception:
-                    allowed_tool_names = None
+                    planner_out = await asyncio.to_thread(get_editor_planner().run, planner_input)
+                    content = getattr(planner_out, "content", None)
+                    if isinstance(content, TaskPlan):
+                        plan = content
+                    elif isinstance(content, list):
+                        plan = TaskPlan.model_validate(content)
+                    elif isinstance(content, str):
+                        # Be tolerant: some models wrap plan as {"tasks":[...]} or return JSON as a string.
+                        try:
+                            parsed = json.loads(content)
+                        except Exception as e:  # noqa: BLE001
+                            raise RuntimeError(f"Invalid editor planner output (not JSON): {content!r}") from e
 
-                if not allowed_tool_names:
-                    # Fallback: allow all registered tools.
-                    allowed_tool_names = list(build_tools().keys())
-
-                planner_input = build_editor_planner_input(
-                    session_id=request.session_id,
-                    message=request.message,
-                    workspace_root=request.workspace_root,
-                    active_file_path=active_file_path,
-                    active_content=request.active_content,
-                    agent_context=request.agent_context,
-                    selected_snippets=request.selected_snippets,
-                    allowed_tools=[t.value if hasattr(t, "value") else str(t) for t in allowed_tool_names],
-                    tool_docs=build_tool_docs(allowed_tool_names),
-                )
-                planner_out = await asyncio.to_thread(get_editor_planner().run, planner_input)
-                content = getattr(planner_out, "content", None)
-                if isinstance(content, TaskPlan):
-                    plan = content
-                elif isinstance(content, list):
-                    plan = TaskPlan.model_validate(content)
-                elif isinstance(content, str):
-                    # Be tolerant: some models wrap plan as {"tasks":[...]} or return JSON as a string.
-                    try:
-                        parsed = json.loads(content)
-                    except Exception as e:  # noqa: BLE001
-                        raise RuntimeError(f"Invalid editor planner output (not JSON): {content!r}") from e
-
-                    if isinstance(parsed, dict):
-                        candidate = parsed.get("tasks") or parsed.get("plan") or parsed.get("root")
-                        if isinstance(candidate, list):
-                            plan = TaskPlan.model_validate(candidate)
-                        elif isinstance(candidate, TaskPlan):
-                            plan = candidate
+                        if isinstance(parsed, dict):
+                            candidate = parsed.get("tasks") or parsed.get("plan") or parsed.get("root")
+                            if isinstance(candidate, list):
+                                plan = TaskPlan.model_validate(candidate)
+                            elif isinstance(candidate, TaskPlan):
+                                plan = candidate
+                            else:
+                                raise RuntimeError(f"Invalid editor planner output dict: {parsed!r}")
+                        elif isinstance(parsed, list):
+                            plan = TaskPlan.model_validate(parsed)
                         else:
-                            raise RuntimeError(f"Invalid editor planner output dict: {parsed!r}")
-                    elif isinstance(parsed, list):
-                        plan = TaskPlan.model_validate(parsed)
+                            raise RuntimeError(f"Invalid editor planner output JSON type: {type(parsed).__name__}")
                     else:
-                        raise RuntimeError(f"Invalid editor planner output JSON type: {type(parsed).__name__}")
-                else:
-                    raise RuntimeError(f"Invalid editor planner output: {content!r}")
+                        raise RuntimeError(f"Invalid editor planner output: {content!r}")
 
             # Normalize deps (models may forget to include dep ids even though they reference <GENERATED>-N).
             plan = _normalize_plan_deps(plan)

@@ -452,20 +452,90 @@ function buildAgentContext(args: {
 }): string {
   const parts: string[] = []
 
+  const sanitizeForContext = (text: string, role: 'user' | 'assistant') => {
+    let t = String(text || '').replace(/\r\n/g, '\n')
+
+    // Drop heavy diff previews / HTML blocks produced by the editor workflow.
+    // These are noisy, long, and often cause the model to anchor on unrelated content.
+    t = t.replace(/<details[^>]*class=["']agent-diff-details["'][\s\S]*?<\/details>/gi, '[Diff omitted]')
+    t = t.replace(/<div[^>]*class=["']agent-diff-box["'][\s\S]*?<\/div>/gi, '[Diff omitted]')
+    t = t.replace(/```diff[\s\S]*?```/gi, '[Diff omitted]')
+
+    // If the assistant message is a workflow report, keep only the concise summary sections.
+    if (role === 'assistant' && /结论（Finished working）|执行概览/.test(t)) {
+      const lines = t.split('\n')
+      const kept: string[] = []
+      let inOverview = false
+      let overviewLines = 0
+
+      for (const line of lines) {
+        const s = line.trim()
+        if (!s) continue
+
+        if (s.startsWith('结论（Finished working）')) {
+          kept.push('结论（Finished working）')
+          continue
+        }
+        if (s.startsWith('任务完成') || s.startsWith('任务失败')) {
+          kept.push(s)
+          continue
+        }
+        if (s.startsWith('执行概览')) {
+          kept.push('执行概览')
+          inOverview = true
+          continue
+        }
+        if (inOverview) {
+          // Keep only a small number of bullet lines.
+          if (s.startsWith('- ')) {
+            kept.push(s)
+            overviewLines += 1
+            if (overviewLines >= 10) {
+              inOverview = false
+            }
+          }
+          continue
+        }
+
+        // Keep compact "结果：" lines if present.
+        if (s.startsWith('结果：')) {
+          kept.push(s)
+        }
+      }
+
+      if (kept.length > 0) {
+        t = kept.join('\n')
+      }
+    }
+
+    // Hard cap per message to avoid context explosion.
+    const cap = role === 'user' ? 800 : 1200
+    if (t.length > cap) {
+      t = `${t.slice(0, cap)}\n[...truncated ${t.length - cap} chars...]`
+    }
+
+    return t.trim()
+  }
+
+  const extractTitle = (markdown: string) => {
+    const lines = String(markdown || '').replace(/\r\n/g, '\n').split('\n')
+    const firstHeading = lines.find((l) => /^\s*#\s+\S/.test(l))
+    return firstHeading ? firstHeading.trim() : ''
+  }
+
   if (args.agentMemorySummary) {
     parts.push(`## Previous Agent Summary\n${args.agentMemorySummary}`)
   }
 
   if (args.activeFilePath) {
     const content = args.currentArticle || ''
-    const excerpt = buildTextExcerpt(content, { head: 3500, tail: 1500 })
+    const title = extractTitle(content)
     parts.push([
       `## Current Article`,
       `Path: ${args.activeFilePath}`,
       `Length: ${content.length} chars`,
       `Note: For full content, use tool "get_current_article" or "read_workspace_file".`,
-      '',
-      excerpt,
+      title ? `Title: ${title.replace(/^#+\s*/, '')}` : '',
     ].join('\n'))
   }
 
@@ -482,7 +552,11 @@ function buildAgentContext(args: {
   const recent = args.chats
     .filter((c: any) => c?.type === 'chat' && c?.content)
     .slice(-12)
-    .map((c: any) => `${c.role === 'user' ? 'User' : 'Assistant'}: ${String(c.content).slice(0, 1000)}`)
+    .map((c: any) => {
+      const role = c.role === 'user' ? 'user' : 'assistant'
+      const cleaned = sanitizeForContext(String(c.content || ''), role)
+      return `${role === 'user' ? 'User' : 'Assistant'}: ${cleaned}`
+    })
     .join('\n')
 
   if (recent) {
@@ -555,25 +629,6 @@ function shouldUpdateAgentMemory(args: { contextLength: number; toolCallsCount: 
     args.iterations >= MAX_ITERATIONS ||
     args.finalAnswerLength >= MAX_FINAL_ANSWER_CHARS
   )
-}
-
-function buildTextExcerpt(text: string, opts: { head: number; tail: number }) {
-  const head = Math.max(0, Math.floor(opts.head))
-  const tail = Math.max(0, Math.floor(opts.tail))
-  const t = String(text || '')
-  if (t.length === 0) return '(empty)'
-
-  if (t.length <= head + tail + 200) return t
-
-  const headPart = t.slice(0, head)
-  const tailPart = t.slice(Math.max(0, t.length - tail))
-  return [
-    headPart,
-    '',
-    `[...omitted ${(t.length - headPart.length - tailPart.length)} chars...]`,
-    '',
-    tailPart,
-  ].join('\n')
 }
 
 async function generateAgentMemorySummary(args: {

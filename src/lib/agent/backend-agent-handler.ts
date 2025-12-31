@@ -259,6 +259,7 @@ export class BackendAgentHandler {
           session_id: sessionId,
           message: userInput,
           workspace_root: workspaceRoot,
+          // Always pass editor context; backend will run an intent router before planner.
           active_file_path: activeAbsPath,
           active_content: activeContent,
           agent_context: opts?.agentContext || null,

@@ -23,6 +23,7 @@ class ToolName(str, Enum):
     REPLACE_LINES = "replace_lines"  # 按行替换（精确编辑）
     APPLY_PATCH = "apply_patch"  # 应用 unified diff patch
     REPLACE_SNIPPET = "replace_snippet"  # 替换选中片段（按文本匹配）
+    WEB_SEARCH = "web_search"  # 联网搜索（仅抓取摘要/链接）
 
 
 # 2. JARVIS 风格任务规划结构（parse_task 输出）

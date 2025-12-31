@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 
 from agno.tools import tool
 from openai import OpenAI
@@ -17,6 +17,48 @@ def _client() -> OpenAI:
     if not api_key:
         raise ValueError("Missing OPENAI_API_KEY")
     return OpenAI(base_url=base_url, api_key=api_key)
+
+
+def iter_generate_text_deltas(
+    *,
+    prompt: str,
+    system: Optional[str] = None,
+    model: Optional[str] = None,
+    temperature: float = 0.2,
+    max_tokens: Optional[int] = None,
+) -> Iterator[str]:
+    """
+    Synchronous streaming helper.
+
+    Returns a list of text deltas in order (so caller can join them).
+    """
+    prompt = str(prompt or "")
+    if not prompt.strip():
+        raise ValueError("prompt is required")
+
+    model_id = model or os.getenv("TEXT_MODEL") or os.getenv("PLANNER_MODEL") or "gpt-4o-mini"
+
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": str(system)})
+    messages.append({"role": "user", "content": prompt})
+
+    c = _client()
+    stream = c.chat.completions.create(
+        model=model_id,
+        messages=messages,
+        temperature=float(temperature or 0.2),
+        max_tokens=int(max_tokens) if max_tokens is not None else None,
+        stream=True,
+    )
+
+    for chunk in stream:
+        try:
+            delta = chunk.choices[0].delta.content or ""
+        except Exception:
+            delta = ""
+        if delta:
+            yield delta
 
 
 @tool(

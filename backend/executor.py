@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import threading
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional, Set, Tuple
 
@@ -22,6 +23,7 @@ from .data_types import (
     ToolArtifactType,
 )
 from .memory import MemoryStore
+from .tools.llm_text import iter_generate_text_deltas
 
 
 EventEmitter = Callable[[Dict[str, Any]], Awaitable[None]]
@@ -214,6 +216,7 @@ class ToolPlanExecutor:
             return None
 
         emit = emit or _noop
+        emit_is_noop = emit is _noop
 
         tasks = list(plan.root)
         if len({t.id for t in tasks}) != len(tasks):
@@ -298,7 +301,68 @@ class ToolPlanExecutor:
 
                 for attempt in range(self._config.max_retries + 1):
                     try:
-                        tool_result = await tool.entrypoint(**resolved_args)
+                        if t.task == ToolName.GENERATE_TEXT and isinstance(resolved_args, dict) and not emit_is_noop:
+                            loop = asyncio.get_running_loop()
+                            q: "asyncio.Queue[str | None]" = asyncio.Queue()
+                            worker_error: list[Exception] = []
+
+                            def worker() -> None:
+                                try:
+                                    for delta in iter_generate_text_deltas(**resolved_args):
+                                        loop.call_soon_threadsafe(q.put_nowait, delta)
+                                except Exception as e:  # noqa: BLE001
+                                    worker_error.append(e)
+                                finally:
+                                    loop.call_soon_threadsafe(q.put_nowait, None)
+
+                            th = threading.Thread(target=worker, daemon=True)
+                            th.start()
+
+                            chunks: list[str] = []
+                            while True:
+                                delta = await q.get()
+                                if delta is None:
+                                    break
+                                chunks.append(delta)
+                                await emit(
+                                    {
+                                        "type": "content_delta",
+                                        "task_id": t.id,
+                                        "task": t.task,
+                                        "delta": delta,
+                                    }
+                                )
+
+                            if worker_error:
+                                raise worker_error[0]
+
+                            content_text = "".join(chunks).strip()
+                            if not content_text:
+                                raise ValueError("Model returned empty content")
+
+                            model_id = (
+                                resolved_args.get("model")
+                                or os.getenv("TEXT_MODEL")
+                                or os.getenv("PLANNER_MODEL")
+                                or "gpt-4o-mini"
+                            )
+                            temp = float(resolved_args.get("temperature") or 0.2)
+
+                            tool_result = ToolResult(
+                                status="succeeded",
+                                progress=100,
+                                results=[
+                                    {
+                                        "type": ToolArtifactType.TEXT,
+                                        "content": content_text,
+                                        "mime": "text/plain; charset=utf-8",
+                                        "meta": {"model": model_id, "temperature": temp},
+                                    }
+                                ],
+                                meta={"model": model_id},
+                            ).model_dump(mode="json")
+                        else:
+                            tool_result = await tool.entrypoint(**resolved_args)
                         parsed = ToolResult.model_validate(tool_result)
                         if not parsed.results:
                             raise ValueError(f"Tool {t.task} returned no results: {tool_result}")

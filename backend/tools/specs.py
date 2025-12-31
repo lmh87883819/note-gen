@@ -23,7 +23,13 @@ TOOL_SPECS: Dict[ToolName, Dict[str, Any]] = {
     ToolName.GENERATE_TEXT: {
         "name": ToolName.GENERATE_TEXT.value,
         "description": "调用 LLM 生成文本（用于新全文或新片段）。",
-        "args": {"prompt": "string", "system": "string?", "model": "string?", "temperature": "number?"},
+        "args": {"prompt": "string", "system": "string?", "model": "string?", "temperature": "number?", "max_tokens": "number?"},
+        "dangerous": False,
+    },
+    ToolName.WEB_SEARCH: {
+        "name": ToolName.WEB_SEARCH.value,
+        "description": "联网搜索（Bing），返回 top 结果（title/url/snippet）JSON 文本。",
+        "args": {"query": "string", "limit": "number?", "region": "string?"},
         "dangerous": False,
     },
     ToolName.DIFF_PREVIEW: {

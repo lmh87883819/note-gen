@@ -105,6 +105,8 @@ class EditorRunRequest(BaseModel):
     active_content: str | None = None
     agent_context: str | None = None
     selected_snippets: list[dict] | None = None
+    enable_search: bool = False
+    thinking_mode: bool = False
     plan: TaskPlan | None = None
 
 
@@ -405,17 +407,54 @@ async def editor_run_stream(request: EditorRunRequest) -> StreamingResponse:
 
                 if intent in {"chat", "clarify"}:
                     prompt = clarify_prompt if (intent == "clarify" and clarify_prompt) else request.message
-                    plan = TaskPlan.model_validate(
-                        [
-                            PlannedTask(
-                                task=ToolName.GENERATE_TEXT,
-                                id=1,
-                                dep=[],
-                                args={"prompt": prompt},
-                                label="生成回复" if intent == "chat" else "引导澄清",
-                            ).model_dump(mode="json")
-                        ]
-                    )
+                    model_override = os.getenv("THINKING_MODEL") if bool(request.thinking_mode) else None
+                    max_tokens = int(os.getenv("THINKING_MAX_TOKENS", "2048")) if bool(request.thinking_mode) else None
+
+                    if intent == "chat" and bool(request.enable_search):
+                        plan = TaskPlan.model_validate(
+                            [
+                                PlannedTask(
+                                    task=ToolName.WEB_SEARCH,
+                                    id=1,
+                                    dep=[],
+                                    args={"query": request.message, "limit": 5},
+                                    label="联网搜索",
+                                ).model_dump(mode="json"),
+                                PlannedTask(
+                                    task=ToolName.GENERATE_TEXT,
+                                    id=2,
+                                    dep=[1],
+                                    args={
+                                        "prompt": (
+                                            "你可以参考联网搜索结果回答用户问题。若搜索结果不足以支撑结论，请说明不确定并建议下一步查询。\n\n"
+                                            "搜索结果（JSON）：\n"
+                                            "<GENERATED>-1-content\n\n"
+                                            "用户问题：\n"
+                                            f"{request.message}\n"
+                                        ),
+                                        **({"model": model_override} if model_override else {}),
+                                        **({"max_tokens": max_tokens} if max_tokens is not None else {}),
+                                    },
+                                    label="生成回复",
+                                ).model_dump(mode="json"),
+                            ]
+                        )
+                    else:
+                        plan = TaskPlan.model_validate(
+                            [
+                                PlannedTask(
+                                    task=ToolName.GENERATE_TEXT,
+                                    id=1,
+                                    dep=[],
+                                    args={
+                                        "prompt": prompt,
+                                        **({"model": model_override} if model_override else {}),
+                                        **({"max_tokens": max_tokens} if max_tokens is not None else {}),
+                                    },
+                                    label="生成回复" if intent == "chat" else "引导澄清",
+                                ).model_dump(mode="json")
+                            ]
+                        )
                 elif intent == "review_article":
                     if not active_file_path:
                         plan = TaskPlan.model_validate(
@@ -430,6 +469,8 @@ async def editor_run_stream(request: EditorRunRequest) -> StreamingResponse:
                             ]
                         )
                     else:
+                        model_override = os.getenv("THINKING_MODEL") if bool(request.thinking_mode) else None
+                        max_tokens = int(os.getenv("THINKING_MAX_TOKENS", "2048")) if bool(request.thinking_mode) else None
                         plan = TaskPlan.model_validate(
                             [
                                 PlannedTask(
@@ -457,7 +498,9 @@ async def editor_run_stream(request: EditorRunRequest) -> StreamingResponse:
                                             "4) 不要修改文件，只做点评\n\n"
                                             "文章内容如下：\n"
                                             "<GENERATED>-1-content"
-                                        )
+                                        ),
+                                        **({"model": model_override} if model_override else {}),
+                                        **({"max_tokens": max_tokens} if max_tokens is not None else {}),
                                     },
                                     label="生成点评",
                                 ).model_dump(mode="json"),

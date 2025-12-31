@@ -9,6 +9,7 @@ import { ModelSelect } from "./model-select"
 import { ChatSend } from "./chat-send"
 import { McpButton } from "./mcp-button"
 import { RagSwitch } from "./rag-switch"
+import { TooltipButton } from "@/components/tooltip-button"
 import { ClearContext } from "./clear-context"
 import { ClearChat } from "./clear-chat"
 import { ChatModeSelect } from "./chat-mode-select"
@@ -16,7 +17,7 @@ import { FileSelector } from "./file-selector"
 import { WorkspaceFile } from "@/lib/files"
 import emitter from "@/lib/emitter"
 import { useIsMobile } from '@/hooks/use-mobile'
-import { X } from "lucide-react"
+import { Brain, Globe, X } from "lucide-react"
 
 type SnippetRef = {
   id: string
@@ -46,6 +47,8 @@ export function ChatInput() {
   const [linkedSnippets, setLinkedSnippets] = useState<SnippetRef[]>([])
   const [inlineImages, setInlineImages] = useState<InlineImageAttachment[]>([])
   const [showFileSelector, setShowFileSelector] = useState(false)
+  const [enableSearch, setEnableSearch] = useLocalStorage<boolean>('agent-enable-search', false)
+  const [thinkingMode, setThinkingMode] = useLocalStorage<boolean>('agent-thinking-mode', false)
   const chatSendRef = useRef<any>(null)
   const isMobile = useIsMobile()
   const editorRef = useRef<HTMLDivElement | null>(null)
@@ -588,6 +591,22 @@ export function ChatInput() {
             
             <div className="flex overflow-x-auto scrollbar-hide md:overflow-visible gap-1">
               <ModelSelect />
+              <TooltipButton
+                variant="ghost"
+                size="icon"
+                icon={<Globe className={enableSearch ? 'text-blue-500' : ''} />}
+                tooltipText={enableSearch ? '联网搜索：已开启' : '联网搜索：已关闭'}
+                side="bottom"
+                onClick={() => setEnableSearch(!enableSearch)}
+              />
+              <TooltipButton
+                variant="ghost"
+                size="icon"
+                icon={<Brain className={thinkingMode ? 'text-purple-500' : ''} />}
+                tooltipText={thinkingMode ? '思考模式：已开启' : '思考模式：已关闭'}
+                side="bottom"
+                onClick={() => setThinkingMode(!thinkingMode)}
+              />
               {isMobile &&
                 chatToolbarConfigMobile
                   .filter(item => item.enabled)
@@ -616,6 +635,8 @@ export function ChatInput() {
               linkedFiles={linkedFiles}
               linkedSnippets={linkedSnippets}
               inlineImages={inlineImages}
+              enableSearch={Boolean(enableSearch)}
+              thinkingMode={Boolean(thinkingMode)}
               ref={chatSendRef}
             />
           </div>

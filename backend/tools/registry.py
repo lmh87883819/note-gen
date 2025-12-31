@@ -12,6 +12,7 @@ from .llm_text import generate_text
 from .replace_lines import replace_lines
 from .replace_snippet import replace_snippet
 from .verify_contains import verify_contains
+from .web_search import web_search
 
 
 def build_tools() -> dict[ToolName, Function]:
@@ -20,6 +21,7 @@ def build_tools() -> dict[ToolName, Function]:
         ToolName.LIST_FILES: list_files,
         ToolName.READ_FILE: read_file,
         ToolName.GENERATE_TEXT: generate_text,
+        ToolName.WEB_SEARCH: web_search,
         ToolName.DIFF_PREVIEW: diff_preview,
         ToolName.VERIFY_CONTAINS: verify_contains,
         ToolName.REPLACE_LINES: replace_lines,

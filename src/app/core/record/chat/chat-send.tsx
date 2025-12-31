@@ -23,9 +23,11 @@ interface ChatSendProps {
   linkedFiles?: WorkspaceFile[];
   linkedSnippets?: { id: string; filePath: string; snippet: string }[];
   inlineImages?: { id: string; name: string; dataUrl: string }[];
+  enableSearch?: boolean;
+  thinkingMode?: boolean;
 }
 
-export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ inputValue, onSent, linkedFiles, linkedSnippets, inlineImages }, ref) => {
+export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ inputValue, onSent, linkedFiles, linkedSnippets, inlineImages, enableSearch, thinkingMode }, ref) => {
   const { primaryModel } = useSettingStore()
   const { insert, loading, setLoading, saveChat, chats, chatMode, agentMemorySummary, setAgentMemorySummary } = useChatStore()
   const { activeFilePath, currentArticle } = useArticleStore()
@@ -109,6 +111,13 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
         // 清空 ref
         agentHandlerRef.current = null
       },
+      onPartial: async (partial) => {
+        // Stream-like UX: update placeholder message while backend is executing.
+        await saveChat({
+          ...placeholderMessage,
+          content: partial,
+        })
+      },
       onError: async (error) => {
         // 更新占位消息为错误信息
         await saveChat({
@@ -125,7 +134,12 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
     agentHandlerRef.current = agentHandler
 
     try {
-      await agentHandler.execute(userInput, { agentContext, selectedSnippets: opts.linkedSnippets })
+      await agentHandler.execute(userInput, {
+        agentContext,
+        selectedSnippets: opts.linkedSnippets,
+        enableSearch: Boolean(enableSearch),
+        thinkingMode: Boolean(thinkingMode),
+      })
     } catch (error) {
       console.error('Agent execution error:', error)
     } finally {

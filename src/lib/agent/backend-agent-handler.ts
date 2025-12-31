@@ -5,6 +5,7 @@ import { getWorkspacePath } from '@/lib/workspace'
 
 type BackendAgentHandlerConfig = {
   onComplete: (finalText: string) => Promise<void> | void
+  onPartial?: (partialText: string) => Promise<void> | void
   onError: (error: string) => Promise<void> | void
 }
 
@@ -12,6 +13,7 @@ type EditorRunEvent =
   | { type: 'run_started'; run_id: string; runId?: string }
   | { type: 'plan'; run_id?: string; runId?: string; plan: any[] }
   | { type: 'progress'; run_id?: string; runId?: string; task_id: number; status: string; task?: string; output?: any; error?: string; attempt?: number }
+  | { type: 'content_delta'; run_id?: string; runId?: string; task_id: number; task?: string; delta: string }
   | { type: 'awaiting_confirmation'; run_id?: string; runId?: string; task_id: number; task: string; args: Record<string, any> }
   | { type: 'run_completed'; run_id?: string; runId?: string; result: any }
   | { type: string; [k: string]: any }
@@ -229,7 +231,7 @@ export class BackendAgentHandler {
     store.setAgentState({ phase: 'stopped', isRunning: false })
   }
 
-  async execute(userInput: string, opts?: { agentContext?: string; selectedSnippets?: Array<{ filePath: string; snippet: string }> }) {
+  async execute(userInput: string, opts?: { agentContext?: string; selectedSnippets?: Array<{ filePath: string; snippet: string }>; enableSearch?: boolean; thinkingMode?: boolean }) {
     const chatStore = useChatStore.getState()
     const articleStore = useArticleStore.getState()
 
@@ -261,6 +263,7 @@ export class BackendAgentHandler {
       const activeAbsPath = activeFilePath ? await resolveActiveFileAbsolute(activeFilePath) : null
       const activeContent = articleStore.currentArticle || null
       let needsRefreshAfterWrite = false
+      let streamingText = ''
 
       const norm = (p: unknown) => String(p || '').replace(/\\/g, '/').toLowerCase()
       const matchesActive = (p: unknown) => {
@@ -284,6 +287,8 @@ export class BackendAgentHandler {
           active_content: activeContent,
           agent_context: opts?.agentContext || null,
           selected_snippets: (opts?.selectedSnippets || []).map(s => ({ file_path: s.filePath, snippet: s.snippet })),
+          enable_search: Boolean(opts?.enableSearch),
+          thinking_mode: Boolean(opts?.thinkingMode),
         }),
         signal,
       })
@@ -296,6 +301,8 @@ export class BackendAgentHandler {
       const planById = new Map<number, any>()
       let backendRunId: string | null = null
       let hasErrored = false
+      let planHasMutations = false
+      const mutatingTasks = new Set(['write_file', 'replace_snippet', 'replace_lines', 'apply_patch'])
 
       await parseSseStream(resp, (ev) => {
         const type = String((ev as any)?.type || '')
@@ -320,6 +327,7 @@ export class BackendAgentHandler {
             for (const step of plan) {
               if (typeof step?.id === 'number') planById.set(step.id, step)
             }
+            planHasMutations = plan.some((s: any) => mutatingTasks.has(String(s?.task || '')))
             chatStore.setAgentState({
               phase: 'executing',
               plan: plan.map((s: any) => {
@@ -344,6 +352,16 @@ export class BackendAgentHandler {
                 timestamp: Date.now(),
               })
             }
+          }
+          return
+        }
+
+        if (type === 'content_delta') {
+          if (planHasMutations) return
+          const delta = String((ev as any).delta || '')
+          if (delta) {
+            streamingText += delta
+            void this.config.onPartial?.(streamingText)
           }
           return
         }
@@ -413,6 +431,15 @@ export class BackendAgentHandler {
           if (status === 'completed') {
             const task = String((ev as any).task || plan?.task || '')
             const out = (ev as any).output || {}
+
+            // Step-level streaming for non-mutating runs (chat/review): show generate_text output as soon as it completes.
+            if (!planHasMutations && task === 'generate_text') {
+              const text = out?.data?.content
+              if (typeof text === 'string' && text.trim()) {
+                void this.config.onPartial?.(text.trim())
+              }
+            }
+
             const toolResult = out?.data?.tool_result
             const outPath =
               toolResult?.meta?.file_path ||

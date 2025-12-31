@@ -831,7 +831,8 @@ const useArticleStore = create<NoteState>((set, get) => ({
       }
       
       // 触发防抖向量计算（不再直接计算）
-      if (path.endsWith('.md')) {
+      const normalized = String(path || '').replace(/\\/g, '/')
+      if (path.endsWith('.md') && (normalized === '知识库' || normalized.startsWith('知识库/'))) {
         get().scheduleVectorCalculation(path, content)
       }
     }

@@ -1,4 +1,4 @@
-import { readTextFile, readDir, BaseDirectory, DirEntry } from "@tauri-apps/plugin-fs";
+import { readTextFile, readDir, BaseDirectory, DirEntry, exists } from "@tauri-apps/plugin-fs";
 import { fetchEmbedding, rerankDocuments } from "./ai";
 import { 
   upsertVectorDocument, 
@@ -15,6 +15,8 @@ import { DirTree } from "@/stores/article";
 import { toast } from "@/hooks/use-toast";
 import { join } from "@tauri-apps/api/path";
 import { Store } from "@tauri-apps/plugin-store";
+
+const KNOWLEDGE_BASE_DIRNAME = "知识库";
 
 /**
  * 文本分块函数，用于将大文本分成小块
@@ -109,6 +111,18 @@ export async function processMarkdownFile(
 ): Promise<boolean> {
   try {
     const workspace = await getWorkspacePath()
+
+    // Only index files under workspace/<知识库>/...
+    const normalized = String(filePath || "").replace(/\\/g, "/")
+    const kbPrefix = `${KNOWLEDGE_BASE_DIRNAME}/`
+    const kbAbs = workspace.isCustom ? (await join(workspace.path, KNOWLEDGE_BASE_DIRNAME)).replace(/\\/g, "/") : ""
+    const isInKb = workspace.isCustom
+      ? (normalized.startsWith(kbAbs) || normalized.startsWith(kbPrefix))
+      : normalized.startsWith(kbPrefix)
+    if (!isInKb) {
+      return true
+    }
+
     let content = ''
     if (workspace.isCustom) {
       content = fileContent || await readTextFile(filePath)
@@ -120,8 +134,19 @@ export async function processMarkdownFile(
     const chunkSize = await store.get<number>('ragChunkSize');
     const chunkOverlap = await store.get<number>('ragChunkOverlap');
     const chunks = chunkText(content, chunkSize, chunkOverlap);
-    // 文件名（不含路径）
-    const filename = filePath.split('/').pop() || filePath;
+
+    // Use workspace-relative path as key (avoid collisions); keep leading "知识库/"
+    const filename = (() => {
+      const p = normalized
+      if (workspace.isCustom) {
+        if (kbAbs && p.startsWith(kbAbs)) {
+          const rel = p.slice(kbAbs.length).replace(/^\/+/, "")
+          return rel ? `${KNOWLEDGE_BASE_DIRNAME}/${rel}` : KNOWLEDGE_BASE_DIRNAME
+        }
+        return p.startsWith(kbPrefix) ? p : `${KNOWLEDGE_BASE_DIRNAME}/${p}`
+      }
+      return p
+    })();
     
     // 先删除该文件的旧记录
     await deleteVectorDocumentsByFilename(filename);
@@ -160,6 +185,15 @@ export async function processMarkdownFile(
  */
 async function getWorkspaceFiles(): Promise<DirTree[]> {
   const workspace = await getWorkspacePath();
+  const kbDir = workspace.isCustom ? await join(workspace.path, KNOWLEDGE_BASE_DIRNAME) : `article/${KNOWLEDGE_BASE_DIRNAME}`
+
+  // If 知识库 folder doesn't exist, treat as empty library.
+  try {
+    const hasKb = await exists(kbDir, workspace.isCustom ? undefined : { baseDir: BaseDirectory.AppData })
+    if (!hasKb) return []
+  } catch {
+    return []
+  }
   
   // 递归处理目录的辅助函数
   async function processDirectory(dirPath: string, useCustomPath: boolean): Promise<DirTree[]> {
@@ -206,9 +240,21 @@ async function getWorkspaceFiles(): Promise<DirTree[]> {
     return result;
   }
   
-  // 开始处理根目录
-  const rootPath = workspace.isCustom ? workspace.path : 'article';
-  return await processDirectory(rootPath, workspace.isCustom);
+  // Only process workspace/<知识库> as the library root, but keep "知识库/" in returned paths.
+  const kbChildren = await processDirectory(kbDir, workspace.isCustom).catch(() => [] as DirTree[])
+  const kbRoot: DirTree = {
+    name: KNOWLEDGE_BASE_DIRNAME,
+    isFile: false,
+    isDirectory: true,
+    isSymlink: false,
+    children: kbChildren,
+    isLocale: true,
+    isEditing: false,
+  }
+  kbChildren.forEach(child => {
+    child.parent = kbRoot
+  })
+  return [kbRoot]
 }
 
 /**

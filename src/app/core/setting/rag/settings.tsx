@@ -8,7 +8,11 @@ import { useEffect } from "react";
 import { Item, ItemGroup, ItemMedia, ItemContent, ItemTitle, ItemActions, ItemDescription } from '@/components/ui/item';
 import { clearVectorDb, initVectorDb } from "@/db/vector";
 import { toast } from "@/hooks/use-toast";
-import { confirm } from "@tauri-apps/plugin-dialog";
+import { confirm, open } from "@tauri-apps/plugin-dialog";
+import useVectorStore from "@/stores/vector";
+import useArticleStore from "@/stores/article";
+import { copyFile, exists, mkdir, readDir } from "@tauri-apps/plugin-fs";
+import { appDataDir, join } from "@tauri-apps/api/path";
 
 export function Settings() {
   const t = useTranslations('settings.rag');
@@ -23,9 +27,111 @@ export function Settings() {
     resetToDefaults
   } = useRagSettingsStore();
 
+  const { processAllDocuments, isProcessing } = useVectorStore();
+  const { loadFileTree } = useArticleStore();
+
   useEffect(() => {
     initSettings();
   }, []);
+
+  async function resolveKnowledgeBaseDir(): Promise<string> {
+    const workspace = await (await import('@/lib/workspace')).getWorkspacePath()
+    if (workspace.isCustom) {
+      return await join(workspace.path, '知识库')
+    }
+    return await join(await appDataDir(), 'article', '知识库')
+  }
+
+  async function ensureKnowledgeBaseDir(): Promise<string> {
+    const dir = await resolveKnowledgeBaseDir()
+    if (!(await exists(dir))) {
+      await mkdir(dir, { recursive: true })
+    }
+    return dir
+  }
+
+  function isMarkdownFile(name: string) {
+    return name.toLowerCase().endsWith('.md')
+  }
+
+  async function copyMarkdownFilesRecursively(sourceDir: string, targetDir: string, relativePath: string = ''): Promise<number> {
+    let copiedCount = 0
+    const entries = await readDir(sourceDir)
+
+    for (const entry of entries) {
+      if (entry.name.startsWith('.')) continue
+      const sourcePath = await join(sourceDir, entry.name)
+      const newRelativePath = relativePath ? await join(relativePath, entry.name) : entry.name
+      const targetPath = await join(targetDir, newRelativePath)
+
+      if (entry.isDirectory) {
+        copiedCount += await copyMarkdownFilesRecursively(sourcePath, targetDir, newRelativePath)
+      } else if (entry.isFile && isMarkdownFile(entry.name)) {
+        const targetDirPath = relativePath ? await join(targetDir, relativePath) : targetDir
+        if (!(await exists(targetDirPath))) {
+          await mkdir(targetDirPath, { recursive: true })
+        }
+        await copyFile(sourcePath, targetPath)
+        copiedCount++
+      }
+    }
+    return copiedCount
+  }
+
+  async function handleImportFiles() {
+    try {
+      const selected = await open({
+        multiple: true,
+        directory: false,
+        title: t('importFiles'),
+      })
+      if (!selected) return
+      const paths = Array.isArray(selected) ? selected : [selected]
+      const targetDir = await ensureKnowledgeBaseDir()
+
+      let count = 0
+      for (const p of paths) {
+        const name = String(p).split(/[\\/]/).pop() || ''
+        if (!name || !isMarkdownFile(name)) continue
+        const targetPath = await join(targetDir, name)
+        await copyFile(String(p), targetPath)
+        count++
+      }
+
+      await loadFileTree()
+      toast({
+        title: t('importSuccess'),
+        description: t('importSuccessDesc', { count }),
+      })
+    } catch (error) {
+      toast({ title: t('importError'), description: String(error), variant: 'destructive' })
+    }
+  }
+
+  async function handleImportFolder() {
+    try {
+      const selectedPath = await open({
+        directory: true,
+        multiple: false,
+        title: t('importFolder'),
+      })
+      if (!selectedPath) return
+      const targetDir = await ensureKnowledgeBaseDir()
+      const count = await copyMarkdownFilesRecursively(String(selectedPath), targetDir)
+      await loadFileTree()
+      toast({
+        title: t('importSuccess'),
+        description: t('importSuccessDesc', { count }),
+      })
+    } catch (error) {
+      toast({ title: t('importError'), description: String(error), variant: 'destructive' })
+    }
+  }
+
+  async function handleReindexAll() {
+    await ensureKnowledgeBaseDir()
+    await processAllDocuments()
+  }
 
   function handleDeleteVector() {
     confirm(t('deleteVectorConfirm')).then(async (result) => {
@@ -120,6 +226,21 @@ export function Settings() {
           })}
         </ItemGroup>
       </FormItem>
+
+      <FormItem title={t('libraryTitle')} desc={t('libraryDesc')}>
+        <div className="flex flex-col md:flex-row gap-2">
+          <Button variant="outline" onClick={handleImportFiles}>
+            {t('importFiles')}
+          </Button>
+          <Button variant="outline" onClick={handleImportFolder}>
+            {t('importFolder')}
+          </Button>
+          <Button variant="default" onClick={handleReindexAll} disabled={isProcessing}>
+            {isProcessing ? t('reindexing') : t('reindexAll')}
+          </Button>
+        </div>
+      </FormItem>
+
       <div className="flex flex-col md:flex-row gap-2 mt-4">
         <Button variant="outline" onClick={resetToDefaults}>
           <RefreshCw className="size-4 mr-2" /> {t('resetToDefaults')}

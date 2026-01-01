@@ -113,6 +113,9 @@ export function AgentExecutionStatus() {
           <div className="text-xs font-medium text-muted-foreground mb-1">
             计划（{agentState.plan.length}） · {agentState.currentIteration}/
             {agentState.maxIterations}
+            {agentState.tokenUsage?.totalTokens
+              ? ` · Tokens ${agentState.tokenUsage.totalTokens}`
+              : ""}
           </div>
           <div className="text-xs text-muted-foreground space-y-0.5">
             {agentState.plan.map((item, i) => (

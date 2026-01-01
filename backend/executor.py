@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import threading
@@ -8,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional, Set, Tuple
 
 from agno.tools import Function
+from agno.models.message import Message
 
 from .data_types import (
     Asset,
@@ -23,7 +25,10 @@ from .data_types import (
     ToolArtifactType,
 )
 from .memory import MemoryStore
-from .tools.llm_text import iter_generate_text_deltas
+from .agents.common import build_compression_manager
+from .tools.llm_text import iter_generate_text_stream
+
+logger = logging.getLogger("backend")
 
 
 EventEmitter = Callable[[Dict[str, Any]], Awaitable[None]]
@@ -95,8 +100,34 @@ class ToolPlanExecutor:
             retry_backoff_s=float(os.getenv("EXECUTOR_RETRY_BACKOFF_S", "0.5")),
         )
         self.step_memory: Dict[int, StepOutput] = {}
+        self._compression_manager = build_compression_manager()
+        self._compressed_cache: Dict[int, str] = {}
 
-    def _resolve_argument(self, arg_value: Any, *, allowed_dep_ids: Set[int]) -> Any:
+    def _compress_tool_result_for_prompt(self, *, dep_id: int, text: str, tool_name: str) -> str:
+        cached = self._compressed_cache.get(dep_id)
+        if cached is not None:
+            return cached
+
+        tool_msg = Message(role="tool", content=text, tool_name=f"{tool_name}:{dep_id}")
+        try:
+            self._compression_manager.compress([tool_msg])
+            compressed = tool_msg.compressed_content or text
+        except Exception:
+            compressed = text
+
+        if compressed != text:
+            logger.info("tool_result_compressed step=%s tool=%s chars=%s->%s", dep_id, tool_name, len(text), len(compressed))
+
+        self._compressed_cache[dep_id] = compressed
+        return compressed
+
+    def _resolve_argument(
+        self,
+        arg_value: Any,
+        *,
+        allowed_dep_ids: Set[int],
+        allow_compression: bool,
+    ) -> Any:
         if not isinstance(arg_value, str):
             return arg_value
         raw = arg_value.strip()
@@ -112,6 +143,13 @@ class ToolPlanExecutor:
             content = None
             if isinstance(output.data, dict):
                 content = output.data.get("content")
+
+            if allow_compression and content is not None:
+                content = self._compress_tool_result_for_prompt(
+                    dep_id=dep_id,
+                    text=str(content),
+                    tool_name=str(step.task.value if hasattr(step.task, "value") else step.task),
+                )
 
             if not field:
                 return str(content or output.asset_uri or output.asset_id or f"<GENERATED>-{dep_id}")
@@ -136,14 +174,38 @@ class ToolPlanExecutor:
 
         return _GEN_TOKEN_RE.sub(repl, raw)
 
-    def _resolve_args(self, value: Any, *, allowed_dep_ids: Set[int], step_results: Dict[int, ExecutedStep]) -> Any:
-        value = self._resolve_argument(value, allowed_dep_ids=allowed_dep_ids)
+    def _resolve_args(
+        self,
+        value: Any,
+        *,
+        allowed_dep_ids: Set[int],
+        step_results: Dict[int, ExecutedStep],
+        allow_compression: bool,
+    ) -> Any:
+        value = self._resolve_argument(
+            value,
+            allowed_dep_ids=allowed_dep_ids,
+            allow_compression=allow_compression,
+        )
         value = _resolve_legacy_refs(value, step_results)
         if isinstance(value, list):
-            return [self._resolve_args(v, allowed_dep_ids=allowed_dep_ids, step_results=step_results) for v in value]
+            return [
+                self._resolve_args(
+                    v,
+                    allowed_dep_ids=allowed_dep_ids,
+                    step_results=step_results,
+                    allow_compression=allow_compression,
+                )
+                for v in value
+            ]
         if isinstance(value, dict):
             return {
-                k: self._resolve_args(v, allowed_dep_ids=allowed_dep_ids, step_results=step_results)
+                k: self._resolve_args(
+                    v,
+                    allowed_dep_ids=allowed_dep_ids,
+                    step_results=step_results,
+                    allow_compression=allow_compression,
+                )
                 for k, v in value.items()
             }
         return value
@@ -261,10 +323,12 @@ class ToolPlanExecutor:
                 if tool is None:
                     raise KeyError(f"Tool not registered: {t.task}")
 
+                allow_compression = bool(t.task == ToolName.GENERATE_TEXT)
                 resolved_args = self._resolve_args(
                     t.args,
                     allowed_dep_ids=set(t.dep),
                     step_results=step_results,
+                    allow_compression=allow_compression,
                 )
 
                 # Ensure workspace_root is always available for filesystem tools to avoid resolving relative paths
@@ -303,13 +367,17 @@ class ToolPlanExecutor:
                     try:
                         if t.task == ToolName.GENERATE_TEXT and isinstance(resolved_args, dict) and not emit_is_noop:
                             loop = asyncio.get_running_loop()
-                            q: "asyncio.Queue[str | None]" = asyncio.Queue()
+                            q: "asyncio.Queue[dict | None]" = asyncio.Queue()
                             worker_error: list[Exception] = []
+                            usage_holder: list[dict] = []
 
                             def worker() -> None:
                                 try:
-                                    for delta in iter_generate_text_deltas(**resolved_args):
-                                        loop.call_soon_threadsafe(q.put_nowait, delta)
+                                    for delta, usage in iter_generate_text_stream(**resolved_args):
+                                        if delta:
+                                            loop.call_soon_threadsafe(q.put_nowait, {"type": "delta", "delta": delta})
+                                        if usage:
+                                            usage_holder[:] = [usage]
                                 except Exception as e:  # noqa: BLE001
                                     worker_error.append(e)
                                 finally:
@@ -320,18 +388,21 @@ class ToolPlanExecutor:
 
                             chunks: list[str] = []
                             while True:
-                                delta = await q.get()
-                                if delta is None:
+                                item = await q.get()
+                                if item is None:
                                     break
-                                chunks.append(delta)
-                                await emit(
-                                    {
-                                        "type": "content_delta",
-                                        "task_id": t.id,
-                                        "task": t.task,
-                                        "delta": delta,
-                                    }
-                                )
+                                if item.get("type") == "delta":
+                                    delta = str(item.get("delta") or "")
+                                    if delta:
+                                        chunks.append(delta)
+                                        await emit(
+                                            {
+                                                "type": "content_delta",
+                                                "task_id": t.id,
+                                                "task": t.task,
+                                                "delta": delta,
+                                            }
+                                        )
 
                             if worker_error:
                                 raise worker_error[0]
@@ -340,13 +411,8 @@ class ToolPlanExecutor:
                             if not content_text:
                                 raise ValueError("Model returned empty content")
 
-                            model_id = (
-                                resolved_args.get("model")
-                                or os.getenv("TEXT_MODEL")
-                                or os.getenv("PLANNER_MODEL")
-                                or "gpt-4o-mini"
-                            )
                             temp = float(resolved_args.get("temperature") or 0.2)
+                            usage = usage_holder[0] if usage_holder else None
 
                             tool_result = ToolResult(
                                 status="succeeded",
@@ -356,10 +422,10 @@ class ToolPlanExecutor:
                                         "type": ToolArtifactType.TEXT,
                                         "content": content_text,
                                         "mime": "text/plain; charset=utf-8",
-                                        "meta": {"model": model_id, "temperature": temp},
+                                        "meta": {"model": model_id, "temperature": temp, "usage": usage},
                                     }
                                 ],
-                                meta={"model": model_id},
+                                meta={"model": model_id, "usage": usage},
                             ).model_dump(mode="json")
                         else:
                             tool_result = await tool.entrypoint(**resolved_args)
@@ -439,9 +505,26 @@ class ToolPlanExecutor:
                         break
 
         memory_snapshot = self._memory.get(session_id)
+        total_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cost": 0.0}
+        has_usage = False
+        for s in executed_steps:
+            try:
+                tr = (s.output.data or {}).get("tool_result") if s.output else None
+                usage = None
+                if isinstance(tr, dict):
+                    usage = (tr.get("meta") or {}).get("usage") or ((tr.get("results") or [{}])[0].get("meta") or {}).get("usage")
+                if isinstance(usage, dict):
+                    has_usage = True
+                    total_usage["input_tokens"] += int(usage.get("input_tokens") or 0)
+                    total_usage["output_tokens"] += int(usage.get("output_tokens") or 0)
+                    total_usage["total_tokens"] += int(usage.get("total_tokens") or 0)
+                    total_usage["cost"] += float(usage.get("cost") or 0.0)
+            except Exception:
+                continue
         return RunResult(
             session_id=session_id,
             plan=plan,
             steps=executed_steps,
             assets=dict(memory_snapshot.assets),
+            metrics=total_usage if has_usage else None,
         )

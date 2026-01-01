@@ -356,6 +356,7 @@ async def editor_run_stream(request: EditorRunRequest) -> StreamingResponse:
     import json
     import time
     from pathlib import Path
+    from agno.models.metrics import Metrics
 
     async def event_stream():
         run_id = f"run-{int(time.time() * 1000)}"
@@ -368,6 +369,20 @@ async def editor_run_stream(request: EditorRunRequest) -> StreamingResponse:
                 len(request.message or ""),
             )
             yield f"data: {json.dumps({'type': 'run_started', 'run_id': run_id}, ensure_ascii=False)}\n\n"
+
+            # Token usage accumulator (best-effort).
+            token_usage_total = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cost": 0.0}
+
+            def add_usage(m: Metrics | dict | None) -> None:
+                if m is None:
+                    return
+                d = m.to_dict() if isinstance(m, Metrics) else (m if isinstance(m, dict) else None)
+                if not isinstance(d, dict):
+                    return
+                token_usage_total["input_tokens"] += int(d.get("input_tokens") or 0)
+                token_usage_total["output_tokens"] += int(d.get("output_tokens") or 0)
+                token_usage_total["total_tokens"] += int(d.get("total_tokens") or 0)
+                token_usage_total["cost"] += float(d.get("cost") or 0.0)
 
             plan = request.plan
             if plan is None:
@@ -394,6 +409,7 @@ async def editor_run_stream(request: EditorRunRequest) -> StreamingResponse:
                         agent_context=request.agent_context,
                     )
                     intent_out = await asyncio.to_thread(get_editor_intent_router().run, intent_input)
+                    add_usage(getattr(intent_out, "metrics", None))
                     intent_content = getattr(intent_out, "content", None)
                     if isinstance(intent_content, dict):
                         intent = str(intent_content.get("intent") or "").strip()
@@ -518,6 +534,7 @@ async def editor_run_stream(request: EditorRunRequest) -> StreamingResponse:
                             selected_snippets=request.selected_snippets,
                         )
                         router_out = await asyncio.to_thread(get_editor_tool_router().run, router_input)
+                        add_usage(getattr(router_out, "metrics", None))
                         route = getattr(router_out, "content", None)
                         if hasattr(route, "tools"):
                             allowed_tool_names = list(route.tools)  # ToolName values
@@ -540,6 +557,7 @@ async def editor_run_stream(request: EditorRunRequest) -> StreamingResponse:
                         tool_docs=build_tool_docs(allowed_tool_names),
                     )
                     planner_out = await asyncio.to_thread(get_editor_planner().run, planner_input)
+                    add_usage(getattr(planner_out, "metrics", None))
                     content = getattr(planner_out, "content", None)
                     if isinstance(content, TaskPlan):
                         plan = content
@@ -606,7 +624,18 @@ async def editor_run_stream(request: EditorRunRequest) -> StreamingResponse:
                         emit=push_event,
                         confirm=confirm_cb,
                     )
-                    await push_event({"type": "run_completed", "result": result.model_dump(mode="json")})
+                    # Merge planning token usage + execution token usage.
+                    merged = dict(token_usage_total)
+                    exec_metrics = getattr(result, "metrics", None)
+                    if isinstance(exec_metrics, dict):
+                        merged["input_tokens"] += int(exec_metrics.get("input_tokens") or 0)
+                        merged["output_tokens"] += int(exec_metrics.get("output_tokens") or 0)
+                        merged["total_tokens"] += int(exec_metrics.get("total_tokens") or 0)
+                        merged["cost"] += float(exec_metrics.get("cost") or 0.0)
+
+                    result_dict = result.model_dump(mode="json")
+                    result_dict["metrics"] = merged
+                    await push_event({"type": "run_completed", "result": result_dict})
                 except Exception as e:  # noqa: BLE001
                     logger.exception("editor_run_stream worker error")
                     await q.put(

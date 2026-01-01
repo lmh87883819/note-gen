@@ -58,6 +58,17 @@ function buildRunSummaryFromResultZh(result: any): string {
   } else {
     lines.push('任务完成。')
   }
+
+  const metrics = result?.metrics
+  if (metrics && typeof metrics === 'object') {
+    const input = Number((metrics as any).input_tokens ?? (metrics as any).inputTokens ?? 0) || 0
+    const output = Number((metrics as any).output_tokens ?? (metrics as any).outputTokens ?? 0) || 0
+    const total = Number((metrics as any).total_tokens ?? (metrics as any).totalTokens ?? 0) || 0
+    const cost = Number((metrics as any).cost ?? 0) || 0
+    if (total > 0) {
+      lines.push(`Token 总消耗：${total}（in ${input} / out ${output}）${cost ? `，cost ${cost}` : ''}`)
+    }
+  }
   lines.push('')
   lines.push('执行概览')
   for (const s of steps) {
@@ -252,6 +263,7 @@ export class BackendAgentHandler {
       toolCalls: [],
       pendingConfirmation: undefined,
       lastError: undefined,
+      tokenUsage: undefined,
     })
 
     this.abortController = new AbortController()
@@ -303,6 +315,15 @@ export class BackendAgentHandler {
       let hasErrored = false
       let planHasMutations = false
       const mutatingTasks = new Set(['write_file', 'replace_snippet', 'replace_lines', 'apply_patch'])
+      const tokenTotals = { inputTokens: 0, outputTokens: 0, totalTokens: 0, cost: 0 }
+      const addUsage = (usage: any) => {
+        if (!usage || typeof usage !== 'object') return
+        tokenTotals.inputTokens += Number(usage.input_tokens ?? usage.inputTokens ?? 0) || 0
+        tokenTotals.outputTokens += Number(usage.output_tokens ?? usage.outputTokens ?? 0) || 0
+        tokenTotals.totalTokens += Number(usage.total_tokens ?? usage.totalTokens ?? 0) || 0
+        tokenTotals.cost += Number(usage.cost ?? 0) || 0
+        chatStore.setAgentState({ tokenUsage: { ...tokenTotals } })
+      }
 
       await parseSseStream(resp, (ev) => {
         const type = String((ev as any)?.type || '')
@@ -431,6 +452,8 @@ export class BackendAgentHandler {
           if (status === 'completed') {
             const task = String((ev as any).task || plan?.task || '')
             const out = (ev as any).output || {}
+            const usage = out?.data?.tool_result?.meta?.usage || out?.data?.tool_result?.results?.[0]?.meta?.usage
+            addUsage(usage)
 
             // Step-level streaming for non-mutating runs (chat/review): show generate_text output as soon as it completes.
             if (!planHasMutations && task === 'generate_text') {
@@ -464,6 +487,17 @@ export class BackendAgentHandler {
 
       if (type === 'run_completed') {
         const result = (ev as any).result
+        const finalMetrics = result?.metrics
+        if (finalMetrics && typeof finalMetrics === 'object') {
+          chatStore.setAgentState({
+            tokenUsage: {
+              inputTokens: Number(finalMetrics.input_tokens ?? finalMetrics.inputTokens ?? tokenTotals.inputTokens ?? 0) || 0,
+              outputTokens: Number(finalMetrics.output_tokens ?? finalMetrics.outputTokens ?? tokenTotals.outputTokens ?? 0) || 0,
+              totalTokens: Number(finalMetrics.total_tokens ?? finalMetrics.totalTokens ?? tokenTotals.totalTokens ?? 0) || 0,
+              cost: Number(finalMetrics.cost ?? tokenTotals.cost ?? 0) || 0,
+            },
+          })
+        }
         const summary = buildFinalAssistantTextFromResult(result)
         chatStore.setAgentState({ phase: 'completed', isRunning: false, pendingConfirmation: undefined })
         void this.config.onComplete(summary)

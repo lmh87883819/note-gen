@@ -89,6 +89,7 @@ const useChatStore = create<ChatState>((set, get) => ({
     pendingConfirmation: undefined,
     confirmationHistory: [],
     lastError: undefined,
+    tokenUsage: undefined,
   },
 
   agentMemorySummary: '',
@@ -117,6 +118,7 @@ const useChatStore = create<ChatState>((set, get) => ({
         pendingConfirmation: undefined,
         confirmationHistory: [],
         lastError: undefined,
+        tokenUsage: undefined,
       }
     })
   },

@@ -107,6 +107,8 @@ class RunResult(BaseModel):
     plan: TaskPlan
     steps: List[ExecutedStep]
     assets: Dict[str, Asset] = Field(default_factory=dict)
+    # Token usage metrics aggregated best-effort (may be None if provider/step doesn't report).
+    metrics: Optional[Dict[str, Any]] = None
 
 
 class EnrichedArgs(BaseModel):

@@ -82,6 +82,7 @@ export const ChatSend = forwardRef<{ sendChat: () => void }, ChatSendProps>(({ i
           thought: allThoughts.join('\n\n'),
           toolCalls: agentState.toolCalls,
           iterations: agentState.currentIteration,
+          tokenUsage: agentState.tokenUsage,
         }
         
         // 更新占位消息

@@ -68,6 +68,12 @@ export interface AgentState {
   }
   confirmationHistory: ConfirmationRecord[] // 确认操作的历史记录
   lastError?: string
+  tokenUsage?: {
+    inputTokens: number
+    outputTokens: number
+    totalTokens: number
+    cost?: number
+  }
 }
 
 export interface ReActStep {

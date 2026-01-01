@@ -4,6 +4,12 @@ import { CheckCircle, XCircle, Loader2, Clock } from "lucide-react"
 
 interface AgentHistoryData {
   thought: string
+  tokenUsage?: {
+    inputTokens: number
+    outputTokens: number
+    totalTokens: number
+    cost?: number
+  }
   toolCalls: Array<{
     id: string
     toolName: string
@@ -34,12 +40,10 @@ export function AgentHistory({ historyJson }: AgentHistoryProps) {
     return null
   }
 
-  if (!history || !history.thought) {
-    return null
-  }
+  if (!history) return null
 
   // 将思考内容按 \n\n 分割成多个思考步骤
-  const thoughts = history.thought.split('\n\n').filter(t => t.trim())
+  const thoughts = (history.thought || '').split('\n\n').filter(t => t.trim())
 
   const toggleExpand = (index: number) => {
     const newExpanded = new Set(expandedItems)
@@ -70,9 +74,19 @@ export function AgentHistory({ historyJson }: AgentHistoryProps) {
   }
 
   const toolCalls = Array.isArray(history.toolCalls) ? history.toolCalls : []
+  const tokenUsage = (history as any).tokenUsage as AgentHistoryData['tokenUsage'] | undefined
+
+  const hasAny = Boolean(tokenUsage?.totalTokens) || thoughts.length > 0 || toolCalls.length > 0
+  if (!hasAny) return null
 
   return (
     <div className="w-full space-y-1 mb-3">
+      {tokenUsage?.totalTokens ? (
+        <div className="py-1.5 px-3 rounded bg-muted/40 text-xs text-muted-foreground">
+          Tokens：{tokenUsage.totalTokens}（in {tokenUsage.inputTokens || 0} / out {tokenUsage.outputTokens || 0}）
+          {tokenUsage.cost ? `，cost ${tokenUsage.cost}` : ''}
+        </div>
+      ) : null}
       {thoughts.map((thought, index) => {
         const isExpanded = expandedItems.has(index)
         const title = extractTitle(thought)
